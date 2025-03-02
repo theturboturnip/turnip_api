@@ -95,7 +95,7 @@ pub struct ApiAppParams {
     /// The maximum amount of claims we will generate for this app at this time
     max_outstanding_claims: usize,
     /// The maximum amount of uses we allow per claim, to avoid one claim starving out all the others
-    max_uses_per_claim: u64,
+    max_requests_per_claim: u64,
     /// The duration of time (in seconds) that new claims are given before they time out
     claim_timeout_s: u64,
 }
@@ -115,14 +115,14 @@ type SecureRng = rand_chacha::ChaCha20Rng;
 struct ApiAppRuntimeInfo {
     app_id: String,
     params: ApiAppParams,
-    /// Mapping of (Claim GUID -> number of uses, timeout)
+    /// Mapping of (Claim GUID -> number of requests, timeout)
     outstanding_claims: RwLock<FastHashMap<String, OutstandingClaimInfo>>,
     /// Secure RNG used for generating the random Subject for each token
     rand: SecureRng,
 }
 
 impl ApiAppRuntimeInfo {
-    fn use_token(&self, token_str: &str, target: ApiTarget) -> Result<(), ValidateTokenError> {
+    fn validate_request(&self, token_str: &str, target: ApiTarget) -> Result<(), ValidateTokenError> {
         if self.params.api != target {
             return Err(ValidateTokenError::ClaimTargetsIncorrectApi {
                 api_claimed: self.params.api,
@@ -137,9 +137,9 @@ impl ApiAppRuntimeInfo {
         if let Some(claim) = claims.get(token_str) {
             // TODO check those atomics
             match claim
-                .uses
+                .requests
                 .fetch_update(Ordering::Release, Ordering::Acquire, |x| {
-                    if x >= self.params.max_uses_per_claim {
+                    if x >= self.params.max_requests_per_claim {
                         None
                     } else {
                         Some(x + 1)
@@ -170,6 +170,8 @@ impl ApiAppRuntimeInfo {
             // Use (timeout+leeway) to ensure that we leave things alive for long enough to handle clock skew
             claims.retain(|_token, outstanding_claim_info| {
                 outstanding_claim_info.timeout + TOKEN_TIMEOUT_LEEWAY > utc_timestamp
+                // Don't do this :)
+                // && outstanding_claim_info.uses.load(Ordering::SeqCst) < self.params.max_uses_per_claim
             });
             if claims.len() >= self.params.max_outstanding_claims {
                 return Err(GenerateTokenError::AppHasTooManyOutstandingClaims);
@@ -189,7 +191,7 @@ impl ApiAppRuntimeInfo {
         claims.insert(
             encoded.clone(),
             OutstandingClaimInfo {
-                uses: AtomicU64::new(0),
+                requests: AtomicU64::new(0),
                 timeout: claim.exp,
             },
         );
@@ -198,7 +200,7 @@ impl ApiAppRuntimeInfo {
 }
 
 struct OutstandingClaimInfo {
-    uses: AtomicU64,
+    requests: AtomicU64,
     timeout: u64,
 }
 
@@ -283,8 +285,9 @@ impl Apps {
     }
 
     /// Given a JWT token, validate it against the App ID it claims to have
-    /// and what ApiTarget endpoint it's been sent to, and increment its uses
-    pub fn validate_token(
+    /// and what ApiTarget endpoint it's been sent to, and increment the number of requests
+    /// (assuming you aren't going over the request limit)
+    pub fn validate_request(
         &self,
         token_str: &str,
         target: ApiTarget,
@@ -310,7 +313,7 @@ impl Apps {
         match self.apps.get(&token.claims.app_id) {
             Some(app) => {
                 let app = app.read().expect("Poisoned lock somehow");
-                app.use_token(token_str, target)
+                app.validate_request(token_str, target)
             }
             None => Err(ValidateTokenError::ClaimHasInvalidAppId),
         }
@@ -345,7 +348,7 @@ pub mod test {
     };
 
     const MAX_OUTSTANDING_CLAIMS: usize = 150;
-    const MAX_USES_PER_CLAIM: u64 = 150;
+    const MAX_REQUESTS_PER_CLAIM: u64 = 100;
     const CLAIM_TIMEOUT_S: u64 = 15 * 60;
 
     fn test_env() -> Apps {
@@ -362,7 +365,7 @@ pub mod test {
                     ApiAppParams {
                         api: ApiTarget::RundownV1,
                         max_outstanding_claims: MAX_OUTSTANDING_CLAIMS,
-                        max_uses_per_claim: MAX_USES_PER_CLAIM,
+                        max_requests_per_claim: MAX_REQUESTS_PER_CLAIM,
                         claim_timeout_s: CLAIM_TIMEOUT_S,
                     }
                 )
@@ -412,15 +415,15 @@ pub mod test {
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
-        apps.validate_token(&token, ApiTarget::RundownV1, 0)
+        apps.validate_request(&token, ApiTarget::RundownV1, 0)
             .expect("Should be able to validate token immediately");
         // We should also be able to validate tokens up to and including timeout + the clock leeway
         for l in 0..TOKEN_TIMEOUT_LEEWAY {
-            apps.validate_token(&token, ApiTarget::RundownV1, 0 + CLAIM_TIMEOUT_S + l)
+            apps.validate_request(&token, ApiTarget::RundownV1, 0 + CLAIM_TIMEOUT_S + l)
                 .expect("Should be able to validate token when within leeway");
         }
         // We should not be able to validate tokens after the timeout+leeway
-        apps.validate_token(
+        apps.validate_request(
             &token,
             ApiTarget::RundownV1,
             0 + CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + 1,
@@ -436,7 +439,7 @@ pub mod test {
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
-        apps.validate_token(&token, ApiTarget::Dummy, 0)
+        apps.validate_request(&token, ApiTarget::Dummy, 0)
             .expect_err("Should not validate token for mismatched API");
     }
 
@@ -474,13 +477,40 @@ pub mod test {
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
-        for _ in 0..MAX_USES_PER_CLAIM {
-            apps.validate_token(&token, ApiTarget::RundownV1, 1)
+        for _ in 0..MAX_REQUESTS_PER_CLAIM {
+            apps.validate_request(&token, ApiTarget::RundownV1, 1)
                 .expect("Should not fail to use token");
         }
 
-        apps.validate_token(&token, ApiTarget::RundownV1, 1)
+        apps.validate_request(&token, ApiTarget::RundownV1, 1)
             .expect_err("Should fail to use a token too many times");
     }
     // TODO must_allow_up_to_n_token_usages_multithreaded
+
+    #[test]
+    fn overused_tokens_must_still_prevent_new_tokens() {
+        // Need to make sure that if a token is used too much it still counts as an "outstanding" token
+        // i.e. that you can't create a new token afterwards.
+        // The purpose of limiting the outstanding tokens is rate limiting, and if you can constantly burn and create new ones
+        // that bypasses it.
+        let apps = test_env();
+
+        for _ in 0..(MAX_OUTSTANDING_CLAIMS - 1) {
+            apps.generate_token("app1", 0).expect("Should not fail to generate tokens");
+        }
+
+        // Make the last token, so now at this point in time we should not be able to make anymore
+        let final_token = apps.generate_token("app1", 0).expect("Should not fail to generate token");
+        apps.generate_token("app1", 0).expect_err("Should be too many tokens");
+
+        // Use the final_token up completely
+        for _ in 0..MAX_REQUESTS_PER_CLAIM {
+            apps.validate_request(&final_token, ApiTarget::RundownV1, 0).expect("Should not fail to use token");
+        }
+        // The final token should be completely used up
+        apps.validate_request(&final_token, ApiTarget::RundownV1, 0).expect_err("Should be too many usages");
+
+        // ...but the final token being used up shouldn't allow us to suddenly create another one
+        apps.generate_token("app1", 0).expect_err("Should still fail because the token is just overused and not expired");
+    }
 }
