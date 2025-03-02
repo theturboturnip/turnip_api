@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["turnip_api", "turnip_api_server"]
