@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use bimap::BiHashMap;
+use bimap::BiBTreeMap;
 use jsonwebtoken::{DecodingKey, EncodingKey, TokenData};
 use lazy_static::lazy_static;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
@@ -15,19 +15,23 @@ use serde::{
     Deserialize, Serialize,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ApiTarget {
     RundownV1,
+    #[cfg(test)]
+    Dummy,
 }
 
-fn gen_api_target_to_str() -> BiHashMap<ApiTarget, &'static str> {
-    let mut map = BiHashMap::new();
+fn gen_api_target_to_str() -> BiBTreeMap<ApiTarget, &'static str> {
+    let mut map = BiBTreeMap::new();
     map.insert(ApiTarget::RundownV1, "turnip_rundown/v1");
+    #[cfg(test)]
+    map.insert(ApiTarget::Dummy, "dummy");
     map
 }
 
 lazy_static! {
-    static ref API_TARGET_STR: BiHashMap<ApiTarget, &'static str> = gen_api_target_to_str();
+    static ref API_TARGET_STR: BiBTreeMap<ApiTarget, &'static str> = gen_api_target_to_str();
 }
 
 // TODO make this use a fast hash
@@ -49,7 +53,11 @@ impl<'de> Deserialize<'de> for ApiTarget {
         struct ExpectedApiTarget;
         impl Expected for ExpectedApiTarget {
             fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                todo!()
+                write!(formatter, "one of")?;
+                for str in API_TARGET_STR.right_values() {
+                    write!(formatter, " '{str}'")?;
+                }
+                Ok(())
             }
         }
         struct Visit;
