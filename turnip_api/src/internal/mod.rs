@@ -85,9 +85,6 @@ impl<'de> Deserialize<'de> for ApiTarget {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct ApiTargetParams {}
-
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct ApiAppParams {
     /// The API target this app can use
@@ -104,11 +101,8 @@ pub struct ApiAppParams {
 pub struct TurnipApiParams {
     /// The key used to generate and validate API claims with the HMAC-SHA-256 scheme
     key_base64: String,
-    targets: FastHashMap<ApiTarget, ApiTargetParams>,
     apps: FastHashMap<String, ApiAppParams>,
 }
-
-struct ApiTargetRuntimeInfo {}
 
 type SecureRng = rand_chacha::ChaCha20Rng;
 
@@ -122,7 +116,11 @@ struct ApiAppRuntimeInfo {
 }
 
 impl ApiAppRuntimeInfo {
-    fn validate_request(&self, token_str: &str, target: ApiTarget) -> Result<(), ValidateTokenError> {
+    fn validate_request(
+        &self,
+        token_str: &str,
+        target: ApiTarget,
+    ) -> Result<(), ValidateTokenError> {
         if self.params.api != target {
             return Err(ValidateTokenError::ClaimTargetsIncorrectApi {
                 api_claimed: self.params.api,
@@ -247,7 +245,6 @@ pub struct Apps {
     dec_key: jsonwebtoken::DecodingKey,
     enc_key: jsonwebtoken::EncodingKey,
     validation: jsonwebtoken::Validation,
-    _targets: FastHashMap<ApiTarget, ApiTargetRuntimeInfo>,
     apps: FastHashMap<String, RwLock<ApiAppRuntimeInfo>>,
 }
 impl Apps {
@@ -264,12 +261,6 @@ impl Apps {
             enc_key: EncodingKey::from_base64_secret(&params.key_base64)
                 .expect("Failed to decode key base64"),
             validation,
-            _targets: FastHashMap::from_iter(
-                params
-                    .targets
-                    .into_iter()
-                    .map(|(target, _target_params)| (target, ApiTargetRuntimeInfo {})),
-            ),
             apps: FastHashMap::from_iter(params.apps.into_iter().map(|(app_key, app_params)| {
                 (
                     app_key.clone(),
@@ -343,8 +334,8 @@ pub mod test {
     use jsonwebtoken::TokenData;
 
     use super::{
-        ApiAppParams, ApiTarget, ApiTargetParams, Apps, FastHashMap, TurnipApiClaim,
-        TurnipApiParams, TOKEN_TIMEOUT_LEEWAY,
+        ApiAppParams, ApiTarget, Apps, FastHashMap, TurnipApiClaim, TurnipApiParams,
+        TOKEN_TIMEOUT_LEEWAY,
     };
 
     const MAX_OUTSTANDING_CLAIMS: usize = 150;
@@ -355,10 +346,6 @@ pub mod test {
         Apps::from_config(TurnipApiParams {
             // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
             key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
-            targets: FastHashMap::from([
-                (ApiTarget::RundownV1, ApiTargetParams {
-                })
-            ]),
             apps: FastHashMap::from([
                 (
                     "app1".to_string(),
@@ -496,21 +483,28 @@ pub mod test {
         let apps = test_env();
 
         for _ in 0..(MAX_OUTSTANDING_CLAIMS - 1) {
-            apps.generate_token("app1", 0).expect("Should not fail to generate tokens");
+            apps.generate_token("app1", 0)
+                .expect("Should not fail to generate tokens");
         }
 
         // Make the last token, so now at this point in time we should not be able to make anymore
-        let final_token = apps.generate_token("app1", 0).expect("Should not fail to generate token");
-        apps.generate_token("app1", 0).expect_err("Should be too many tokens");
+        let final_token = apps
+            .generate_token("app1", 0)
+            .expect("Should not fail to generate token");
+        apps.generate_token("app1", 0)
+            .expect_err("Should be too many tokens");
 
         // Use the final_token up completely
         for _ in 0..MAX_REQUESTS_PER_CLAIM {
-            apps.validate_request(&final_token, ApiTarget::RundownV1, 0).expect("Should not fail to use token");
+            apps.validate_request(&final_token, ApiTarget::RundownV1, 0)
+                .expect("Should not fail to use token");
         }
         // The final token should be completely used up
-        apps.validate_request(&final_token, ApiTarget::RundownV1, 0).expect_err("Should be too many usages");
+        apps.validate_request(&final_token, ApiTarget::RundownV1, 0)
+            .expect_err("Should be too many usages");
 
         // ...but the final token being used up shouldn't allow us to suddenly create another one
-        apps.generate_token("app1", 0).expect_err("Should still fail because the token is just overused and not expired");
+        apps.generate_token("app1", 0)
+            .expect_err("Should still fail because the token is just overused and not expired");
     }
 }
