@@ -87,8 +87,8 @@ impl<'de> Deserialize<'de> for ApiTarget {
 /// This is always indexed by valid app strings - or at least not user-controlled strings.
 /// We pass in the appid from known-valid JWTs, and we are the only people who can create them.
 /// That means we can use a fast hash map without worrying about HashDos attacks.
-struct AppIdMap(FxHashMap<String, RwLock<ApiAppRuntimeInfo>>);
-impl AppIdMap {
+struct AppRuntimeInfos(FxHashMap<String, RwLock<ApiAppRuntimeInfo>>);
+impl AppRuntimeInfos {
     fn new(apps: HashMap<String, ApiAppParams>) -> Self {
         let mut map = FxHashMap::default();
         map.extend(apps.into_iter().map(|(app_id, params)| {
@@ -99,7 +99,7 @@ impl AppIdMap {
         }));
         Self(map)
     }
-    fn get_app(&self, key: &str) -> Option<&RwLock<ApiAppRuntimeInfo>> {
+    fn get_app_runtime(&self, key: &str) -> Option<&RwLock<ApiAppRuntimeInfo>> {
         self.0.get(key)
     }
 }
@@ -265,13 +265,13 @@ pub enum GenerateTokenError {
 const TOKEN_ALGORITHM: jsonwebtoken::Algorithm = jsonwebtoken::Algorithm::HS256;
 const TOKEN_TIMEOUT_LEEWAY: u64 = 30;
 
-pub struct Apps {
+pub struct AppAuth {
     dec_key: jsonwebtoken::DecodingKey,
     enc_key: jsonwebtoken::EncodingKey,
     validation: jsonwebtoken::Validation,
-    apps: AppIdMap,
+    app_runtimes: AppRuntimeInfos,
 }
-impl Apps {
+impl AppAuth {
     pub fn from_config(params: TurnipApiParams) -> Self {
         let mut validation = jsonwebtoken::Validation::new(TOKEN_ALGORITHM);
         // We manually validate the EXP so we don't need to worry about dependency-injecting time at test time
@@ -285,7 +285,7 @@ impl Apps {
             enc_key: EncodingKey::from_base64_secret(&params.key_base64)
                 .expect("Failed to decode key base64"),
             validation,
-            apps: AppIdMap::new(params.apps),
+            app_runtimes: AppRuntimeInfos::new(params.apps),
         }
     }
 
@@ -315,10 +315,10 @@ impl Apps {
         if token.claims.exp + TOKEN_TIMEOUT_LEEWAY < utc_timestamp {
             return Err(ValidateTokenError::ClaimHasExpired);
         }
-        match self.apps.get_app(&token.claims.app_id) {
-            Some(app) => {
-                let app = app.read().expect("Poisoned lock somehow");
-                app.validate_request(token_str, target)
+        match self.app_runtimes.get_app_runtime(&token.claims.app_id) {
+            Some(app_runtime) => {
+                let app_runtime = app_runtime.read().expect("Poisoned lock somehow");
+                app_runtime.validate_request(token_str, target)
             }
             None => Err(ValidateTokenError::ClaimHasInvalidAppId),
         }
@@ -330,10 +330,10 @@ impl Apps {
         utc_timestamp: u64,
     ) -> Result<String, GenerateTokenError> {
         let key = &self.enc_key;
-        match self.apps.get_app(app_id) {
-            Some(app) => {
-                let mut app = app.write().expect("Poisoned lock somehow");
-                app.generate_token(key, utc_timestamp)
+        match self.app_runtimes.get_app_runtime(app_id) {
+            Some(app_runtime) => {
+                let mut app_runtime = app_runtime.write().expect("Poisoned lock somehow");
+                app_runtime.generate_token(key, utc_timestamp)
             }
             None => Err(GenerateTokenError::BadAppId),
         }
@@ -351,15 +351,15 @@ pub mod test {
     use jsonwebtoken::TokenData;
 
     use super::{
-        ApiAppParams, ApiTarget, Apps, TurnipApiClaim, TurnipApiParams, TOKEN_TIMEOUT_LEEWAY,
+        ApiAppParams, ApiTarget, AppAuth, TurnipApiClaim, TurnipApiParams, TOKEN_TIMEOUT_LEEWAY,
     };
 
     const MAX_OUTSTANDING_CLAIMS: usize = 150;
     const MAX_REQUESTS_PER_CLAIM: u64 = 100;
     const CLAIM_TIMEOUT_S: u64 = 15 * 60;
 
-    fn test_env() -> Apps {
-        Apps::from_config(TurnipApiParams {
+    fn test_env() -> AppAuth {
+        AppAuth::from_config(TurnipApiParams {
             // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
             key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
             apps: HashMap::from([
@@ -427,16 +427,16 @@ pub mod test {
 
     #[test]
     fn claims_must_have_unique_subjects() {
-        let apps = test_env();
+        let app_auth = test_env();
 
         let mut rands = HashSet::new();
 
         for _ in 0..MAX_OUTSTANDING_CLAIMS {
-            let token = apps
+            let token = app_auth
                 .generate_token("app1", 0)
                 .expect("Should not fail to generate tokens");
             let token: TokenData<TurnipApiClaim> =
-                jsonwebtoken::decode(&token, &apps.dec_key, &apps.validation)
+                jsonwebtoken::decode(&token, &app_auth.dec_key, &app_auth.validation)
                     .expect("Should be able to verify and decode the token");
             rands.insert(token.claims.sub);
         }
@@ -446,22 +446,24 @@ pub mod test {
 
     #[test]
     fn must_only_allow_up_to_max_outstanding_claims() {
-        let apps = test_env();
+        let app_auth = test_env();
 
         // Make a bunch of initial claims
         for _ in 0..MAX_OUTSTANDING_CLAIMS {
-            apps.generate_token("app1", 0)
+            app_auth
+                .generate_token("app1", 0)
                 .expect("Should not fail to generate tokens");
         }
 
         // Make another claim, which should fail
-        apps.generate_token("app1", 0)
+        app_auth
+            .generate_token("app1", 0)
             .expect_err("Should fail to make too many");
     }
 
     #[test]
     fn must_only_allow_up_to_max_outstanding_claims_multithreaded() {
-        let apps = test_env();
+        let app_auth = test_env();
 
         const N_THREADS: usize = 64;
         const N_GENERATIONS_PER_THREAD: usize = MAX_OUTSTANDING_CLAIMS / N_THREADS + 5;
@@ -479,7 +481,7 @@ pub mod test {
                     while !go_flag.load(Ordering::Acquire) {}
 
                     for _ in 0..N_GENERATIONS_PER_THREAD {
-                        match apps.generate_token("app1", 0) {
+                        match app_auth.generate_token("app1", 0) {
                             Ok(_) => n_successes.fetch_add(1, Ordering::AcqRel),
                             Err(_) => n_fails.fetch_add(1, Ordering::AcqRel),
                         };
@@ -500,9 +502,9 @@ pub mod test {
             n_fails.load(Ordering::Acquire),
             N_TOTAL_CLAIMS - MAX_OUTSTANDING_CLAIMS
         );
-        let claims = &apps
-            .apps
-            .get_app("app1")
+        let claims = &app_auth
+            .app_runtimes
+            .get_app_runtime("app1")
             .unwrap()
             .read()
             .unwrap()
@@ -512,88 +514,97 @@ pub mod test {
 
     #[test]
     fn must_allow_claim_to_expire_within_leeway() {
-        let apps = test_env();
+        let app_auth = test_env();
 
-        let token = apps
+        let token = app_auth
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
-        apps.validate_request(&token, ApiTarget::RundownV1, 0)
+        app_auth
+            .validate_request(&token, ApiTarget::RundownV1, 0)
             .expect("Should be able to validate token immediately");
         // We should also be able to validate tokens up to and including timeout + the clock leeway
         for l in 0..TOKEN_TIMEOUT_LEEWAY {
-            apps.validate_request(&token, ApiTarget::RundownV1, 0 + CLAIM_TIMEOUT_S + l)
+            app_auth
+                .validate_request(&token, ApiTarget::RundownV1, 0 + CLAIM_TIMEOUT_S + l)
                 .expect("Should be able to validate token when within leeway");
         }
         // We should not be able to validate tokens after the timeout+leeway
-        apps.validate_request(
-            &token,
-            ApiTarget::RundownV1,
-            0 + CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + 1,
-        )
-        .expect_err("Should not be able to validate token when outside leeway");
+        app_auth
+            .validate_request(
+                &token,
+                ApiTarget::RundownV1,
+                0 + CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + 1,
+            )
+            .expect_err("Should not be able to validate token when outside leeway");
     }
 
     #[test]
     fn must_disallow_mismatched_api_target() {
-        let apps = test_env();
+        let app_auth = test_env();
 
-        let token = apps
+        let token = app_auth
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
-        apps.validate_request(&token, ApiTarget::Dummy, 0)
+        app_auth
+            .validate_request(&token, ApiTarget::Dummy, 0)
             .expect_err("Should not validate token for mismatched API");
     }
 
     #[test]
     fn must_allow_new_tokens_once_others_have_expired() {
-        let apps = test_env();
+        let app_auth = test_env();
 
         const TOKEN_ISSUE_OFFSET: u64 = 1;
         assert!((MAX_OUTSTANDING_CLAIMS as u64) * TOKEN_ISSUE_OFFSET < CLAIM_TIMEOUT_S);
         for i in 0..MAX_OUTSTANDING_CLAIMS {
-            apps.generate_token("app1", 0 + TOKEN_ISSUE_OFFSET * (i as u64))
+            app_auth
+                .generate_token("app1", 0 + TOKEN_ISSUE_OFFSET * (i as u64))
                 .expect("Should not fail to generate tokens");
         }
 
         let last_token_issue_time = (MAX_OUTSTANDING_CLAIMS as u64) * TOKEN_ISSUE_OFFSET;
         // So at this point we shouldn't expect to generate a token, all will still be outstanding
-        apps.generate_token("app1", last_token_issue_time)
+        app_auth
+            .generate_token("app1", last_token_issue_time)
             .expect_err("Should fail to generate new token while all are valid");
 
         // We can generate tokens one-at-a-time as the previous ones decay.
         for i in 0..MAX_OUTSTANDING_CLAIMS {
-            apps.generate_token(
-                "app1",
-                CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + TOKEN_ISSUE_OFFSET * (i as u64),
-            )
-            .expect("Should not fail to generate tokens second time around");
+            app_auth
+                .generate_token(
+                    "app1",
+                    CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + TOKEN_ISSUE_OFFSET * (i as u64),
+                )
+                .expect("Should not fail to generate tokens second time around");
         }
     }
 
     #[test]
     fn must_allow_up_to_n_token_requests() {
-        let apps = test_env();
+        let app_auth = test_env();
 
-        let token = apps
+        let token = app_auth
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
         for _ in 0..MAX_REQUESTS_PER_CLAIM {
-            apps.validate_request(&token, ApiTarget::RundownV1, 1)
+            app_auth
+                .validate_request(&token, ApiTarget::RundownV1, 1)
                 .expect("Should not fail to use token");
         }
 
-        apps.validate_request(&token, ApiTarget::RundownV1, 1)
+        app_auth
+            .validate_request(&token, ApiTarget::RundownV1, 1)
             .expect_err("Should fail to use a token too many times");
     }
 
     #[test]
     fn must_allow_up_to_n_token_requests_multithreaded() {
-        let apps = test_env();
+        let app_auth = test_env();
 
-        let token = apps
+        let token = app_auth
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
 
@@ -613,7 +624,7 @@ pub mod test {
                     while !go_flag.load(Ordering::Acquire) {}
 
                     for _ in 0..N_TOKEN_REQUESTS_PER_THREAD {
-                        match apps.validate_request(&token, ApiTarget::RundownV1, 0) {
+                        match app_auth.validate_request(&token, ApiTarget::RundownV1, 0) {
                             Ok(_) => n_successes.fetch_add(1, Ordering::AcqRel),
                             Err(_) => n_fails.fetch_add(1, Ordering::AcqRel),
                         };
@@ -634,9 +645,9 @@ pub mod test {
             n_fails.load(Ordering::Acquire),
             N_TOTAL_REQUESTS - MAX_REQUESTS_PER_CLAIM
         );
-        let claims = &apps
-            .apps
-            .get_app("app1")
+        let claims = &app_auth
+            .app_runtimes
+            .get_app_runtime("app1")
             .unwrap()
             .read()
             .unwrap()
@@ -654,31 +665,36 @@ pub mod test {
         // i.e. that you can't create a new token afterwards.
         // The purpose of limiting the outstanding tokens is rate limiting, and if you can constantly burn and create new ones
         // that bypasses it.
-        let apps = test_env();
+        let app_auth = test_env();
 
         for _ in 0..(MAX_OUTSTANDING_CLAIMS - 1) {
-            apps.generate_token("app1", 0)
+            app_auth
+                .generate_token("app1", 0)
                 .expect("Should not fail to generate tokens");
         }
 
         // Make the last token, so now at this point in time we should not be able to make anymore
-        let final_token = apps
+        let final_token = app_auth
             .generate_token("app1", 0)
             .expect("Should not fail to generate token");
-        apps.generate_token("app1", 0)
+        app_auth
+            .generate_token("app1", 0)
             .expect_err("Should be too many tokens");
 
         // Use the final_token up completely
         for _ in 0..MAX_REQUESTS_PER_CLAIM {
-            apps.validate_request(&final_token, ApiTarget::RundownV1, 0)
+            app_auth
+                .validate_request(&final_token, ApiTarget::RundownV1, 0)
                 .expect("Should not fail to use token");
         }
         // The final token should be completely used up
-        apps.validate_request(&final_token, ApiTarget::RundownV1, 0)
+        app_auth
+            .validate_request(&final_token, ApiTarget::RundownV1, 0)
             .expect_err("Should be too many requests");
 
         // ...but the final token being used up shouldn't allow us to suddenly create another one
-        apps.generate_token("app1", 0)
+        app_auth
+            .generate_token("app1", 0)
             .expect_err("Should still fail because the token is just overused and not expired");
     }
 }
