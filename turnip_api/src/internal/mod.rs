@@ -9,103 +9,60 @@ use std::{
 use jsonwebtoken::{DecodingKey, EncodingKey, TokenData};
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rustc_hash::{FxBuildHasher, FxHashMap};
-use serde::{
-    de::{Expected, Visitor},
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(usize)]
-pub enum ApiTarget {
-    RundownV1,
-    Dummy,
-}
-const API_TARGET_TO_STR: [&'static str; 2] = ["turnip_rundown/v1", "dummy"];
-impl From<ApiTarget> for &'static str {
-    fn from(value: ApiTarget) -> Self {
-        API_TARGET_TO_STR[value as usize]
-    }
-}
-impl ApiTarget {
-    fn try_from_str(s: &str) -> Option<Self> {
-        match s {
-            val if (val == API_TARGET_TO_STR[ApiTarget::RundownV1 as usize]) => {
-                Some(ApiTarget::RundownV1)
-            }
-            val if (val == API_TARGET_TO_STR[ApiTarget::Dummy as usize]) => Some(ApiTarget::Dummy),
-            _ => None,
-        }
-    }
+mod api_target;
+pub use api_target::ApiTarget;
+
+const TURNIP_API_AUD: &'static str = "turnip_api";
+const TURNIP_API_CLAIM_ALGORITHM: jsonwebtoken::Algorithm = jsonwebtoken::Algorithm::HS256;
+const TURNIP_API_CLAIM_TIMEOUT_LEEWAY: u64 = 30;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TurnipApiClaim {
+    /// The ID of the application requesting access.
+    /// Must be one of a set of expected applications for the ApiTarget
+    /// connected to the endpoint that received this
+    app_id: String,
+    /// Expiration time (as UTC timestamp)
+    exp: u64,
+    /// Audience, must be TURNIP_API_AUD
+    aud: String,
+    /// Subject (the user of the JWT, which is just a random string for our purposes)
+    sub: String,
 }
 
-impl Serialize for ApiTarget {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str((*self).into())
-    }
-}
-impl<'de> Deserialize<'de> for ApiTarget {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct ExpectedApiTarget;
-        impl Expected for ExpectedApiTarget {
-            fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "one of")?;
-                for str in API_TARGET_TO_STR {
-                    write!(formatter, " '{str}'")?;
-                }
-                Ok(())
-            }
-        }
-        struct Visit;
-        impl<'de> Visitor<'de> for Visit {
-            type Value = ApiTarget;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                ExpectedApiTarget.fmt(formatter)
-            }
-            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                ApiTarget::try_from_str(v).ok_or(serde::de::Error::invalid_value(
-                    serde::de::Unexpected::Str(v),
-                    &ExpectedApiTarget,
-                ))
-            }
-        }
-
-        deserializer.deserialize_str(Visit)
-    }
+#[derive(Debug, Clone)]
+pub enum GenerateTokenError {
+    JwtError(jsonwebtoken::errors::Error),
+    BadAppId,
+    AppHasTooManyOutstandingClaims,
 }
 
-/// Mapping of app-ids to the runtime information about that app.
-/// This is always indexed by valid app strings - or at least not user-controlled strings.
-/// We pass in the appid from known-valid JWTs, and we are the only people who can create them.
-/// That means we can use a fast hash map without worrying about HashDos attacks.
-struct AppRuntimeInfos(FxHashMap<String, RwLock<ApiAppRuntimeInfo>>);
-impl AppRuntimeInfos {
-    fn new(apps: HashMap<String, ApiAppParams>) -> Self {
-        let mut map = FxHashMap::default();
-        map.extend(apps.into_iter().map(|(app_id, params)| {
-            (
-                app_id.clone(),
-                RwLock::new(ApiAppRuntimeInfo::new(app_id, params)),
-            )
-        }));
-        Self(map)
-    }
-    fn get_app_runtime(&self, key: &str) -> Option<&RwLock<ApiAppRuntimeInfo>> {
-        self.0.get(key)
-    }
+#[derive(Debug, Clone)]
+pub enum ValidateTokenError {
+    JwtError(jsonwebtoken::errors::Error),
+    // Either the app doesn't exist or the app doesn't know about this claim
+    ClaimHasInvalidAppId,
+    ClaimHasExpired,
+    ClaimHasBadAudience,
+    ClaimTargetsIncorrectApi {
+        api_claimed: ApiTarget,
+        api_requested: ApiTarget,
+    },
+    ClaimExceedsUses,
+}
+
+/// Top-level parameters structure used for initializing
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppAuthParams {
+    /// The key used to generate and validate API claims with the HMAC-SHA-256 scheme
+    key_base64: String,
+    apps: HashMap<String, PerAppParams>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct ApiAppParams {
+pub struct PerAppParams {
     /// The API target this app can use
     api: ApiTarget,
     /// The maximum amount of claims we will generate for this app at this time
@@ -116,18 +73,108 @@ pub struct ApiAppParams {
     claim_timeout_s: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TurnipApiParams {
-    /// The key used to generate and validate API claims with the HMAC-SHA-256 scheme
-    key_base64: String,
-    apps: HashMap<String, ApiAppParams>,
+pub struct AppAuth {
+    dec_key: jsonwebtoken::DecodingKey,
+    enc_key: jsonwebtoken::EncodingKey,
+    validation: jsonwebtoken::Validation,
+    app_runtimes: AppRuntimeInfos,
+}
+impl AppAuth {
+    pub fn from_config(params: AppAuthParams) -> Self {
+        let mut validation = jsonwebtoken::Validation::new(TURNIP_API_CLAIM_ALGORITHM);
+        // We manually validate the EXP so we don't need to worry about dependency-injecting time at test time
+        validation.validate_exp = false;
+        validation.set_audience(&[TURNIP_API_AUD]);
+        validation.set_required_spec_claims(&["app_id", "exp", "aud", "sub"]);
+
+        Self {
+            dec_key: DecodingKey::from_base64_secret(&params.key_base64)
+                .expect("Failed to decode key base64"),
+            enc_key: EncodingKey::from_base64_secret(&params.key_base64)
+                .expect("Failed to decode key base64"),
+            validation,
+            app_runtimes: AppRuntimeInfos::new(params.apps),
+        }
+    }
+
+    /// Given a JWT token, validate it against the App ID it claims to have
+    /// and what ApiTarget endpoint it's been sent to, and increment the number of requests
+    /// (assuming you aren't going over the request limit)
+    pub fn validate_request(
+        &self,
+        token_str: &str,
+        target: ApiTarget,
+        utc_timestamp: u64,
+    ) -> Result<(), ValidateTokenError> {
+        let key = &self.dec_key;
+        let token: TokenData<TurnipApiClaim> =
+            jsonwebtoken::decode(token_str, key, &self.validation).map_err(|err| {
+                match err.kind() {
+                    jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                        // This should never happen because we tell the validator to not check the timeout leeway
+                        ValidateTokenError::ClaimHasExpired
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                        ValidateTokenError::ClaimHasBadAudience
+                    }
+                    _ => ValidateTokenError::JwtError(err),
+                }
+            })?;
+        if token.claims.exp + TURNIP_API_CLAIM_TIMEOUT_LEEWAY < utc_timestamp {
+            return Err(ValidateTokenError::ClaimHasExpired);
+        }
+        match self.app_runtimes.get_app_runtime(&token.claims.app_id) {
+            Some(app_runtime) => {
+                let app_runtime = app_runtime.read().expect("Poisoned lock somehow");
+                app_runtime.validate_request(token_str, target)
+            }
+            None => Err(ValidateTokenError::ClaimHasInvalidAppId),
+        }
+    }
+    /// Given an App ID, generate a new token for it (if it has spare outstanding claims)
+    pub fn generate_token(
+        &self,
+        app_id: &str,
+        utc_timestamp: u64,
+    ) -> Result<String, GenerateTokenError> {
+        let key = &self.enc_key;
+        match self.app_runtimes.get_app_runtime(app_id) {
+            Some(app_runtime) => {
+                let mut app_runtime = app_runtime.write().expect("Poisoned lock somehow");
+                app_runtime.generate_token(key, utc_timestamp)
+            }
+            None => Err(GenerateTokenError::BadAppId),
+        }
+    }
+    // TODO renew tokens?
+}
+
+/// Mapping of app-ids to the runtime information about that app.
+/// This is always indexed by valid app strings - or at least not user-controlled strings.
+/// We pass in the appid from known-valid JWTs, and we are the only people who can create them.
+/// That means we can use a fast hash map without worrying about HashDos attacks.
+struct AppRuntimeInfos(FxHashMap<String, RwLock<PerAppRuntimeInfo>>);
+impl AppRuntimeInfos {
+    fn new(apps: HashMap<String, PerAppParams>) -> Self {
+        let mut map = FxHashMap::default();
+        map.extend(apps.into_iter().map(|(app_id, params)| {
+            (
+                app_id.clone(),
+                RwLock::new(PerAppRuntimeInfo::new(app_id, params)),
+            )
+        }));
+        Self(map)
+    }
+    fn get_app_runtime(&self, key: &str) -> Option<&RwLock<PerAppRuntimeInfo>> {
+        self.0.get(key)
+    }
 }
 
 type SecureRng = rand_chacha::ChaCha20Rng;
 
-struct ApiAppRuntimeInfo {
+struct PerAppRuntimeInfo {
     app_id: String,
-    params: ApiAppParams,
+    params: PerAppParams,
     /// Mapping of (Claim GUID -> number of requests, timeout)
     /// Only used on verified claims, which we generate, so can be a fast hash map
     outstanding_claims: FxHashMap<String, OutstandingClaimInfo>,
@@ -135,8 +182,8 @@ struct ApiAppRuntimeInfo {
     rand: SecureRng,
 }
 
-impl ApiAppRuntimeInfo {
-    fn new(app_id: String, params: ApiAppParams) -> Self {
+impl PerAppRuntimeInfo {
+    fn new(app_id: String, params: PerAppParams) -> Self {
         Self {
             app_id,
             params,
@@ -191,7 +238,7 @@ impl ApiAppRuntimeInfo {
             // Use (timeout+leeway) to ensure that we leave things alive for long enough to handle clock skew
             self.outstanding_claims
                 .retain(|_token, outstanding_claim_info| {
-                    outstanding_claim_info.timeout + TOKEN_TIMEOUT_LEEWAY > utc_timestamp
+                    outstanding_claim_info.timeout + TURNIP_API_CLAIM_TIMEOUT_LEEWAY > utc_timestamp
                     // Don't do this :)
                     // && outstanding_claim_info.uses.load(Ordering::SeqCst) < self.params.max_uses_per_claim
                 });
@@ -207,9 +254,12 @@ impl ApiAppRuntimeInfo {
             aud: TURNIP_API_AUD.to_string(),
             sub: self.rand.next_u64().to_string(),
         };
-        let encoded =
-            jsonwebtoken::encode(&jsonwebtoken::Header::new(TOKEN_ALGORITHM), &claim, &key)
-                .map_err(|err| GenerateTokenError::JwtError(err))?;
+        let encoded = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(TURNIP_API_CLAIM_ALGORITHM),
+            &claim,
+            &key,
+        )
+        .map_err(|err| GenerateTokenError::JwtError(err))?;
         self.outstanding_claims.insert(
             encoded.clone(),
             OutstandingClaimInfo {
@@ -226,121 +276,6 @@ struct OutstandingClaimInfo {
     timeout: u64,
 }
 
-const TURNIP_API_AUD: &'static str = "turnip_api";
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TurnipApiClaim {
-    /// The ID of the application requesting access.
-    /// Must be one of a set of expected applications for that target
-    app_id: String,
-    /// Expiration time (as UTC timestamp), automatically validated
-    exp: u64,
-    /// Audience, must be TURNIP_API_AUD
-    aud: String,
-    /// Subject (the user of the JWT, which is just a random string for our purposes)
-    sub: String,
-}
-
-#[derive(Debug, Clone)]
-pub enum ValidateTokenError {
-    JwtError(jsonwebtoken::errors::Error),
-    // Either the app doesn't exist or the app doesn't know about this claim
-    ClaimHasInvalidAppId,
-    ClaimHasExpired,
-    ClaimHasBadAudience,
-    ClaimTargetsIncorrectApi {
-        api_claimed: ApiTarget,
-        api_requested: ApiTarget,
-    },
-    ClaimExceedsUses,
-}
-
-#[derive(Debug, Clone)]
-pub enum GenerateTokenError {
-    JwtError(jsonwebtoken::errors::Error),
-    BadAppId,
-    AppHasTooManyOutstandingClaims,
-}
-
-const TOKEN_ALGORITHM: jsonwebtoken::Algorithm = jsonwebtoken::Algorithm::HS256;
-const TOKEN_TIMEOUT_LEEWAY: u64 = 30;
-
-pub struct AppAuth {
-    dec_key: jsonwebtoken::DecodingKey,
-    enc_key: jsonwebtoken::EncodingKey,
-    validation: jsonwebtoken::Validation,
-    app_runtimes: AppRuntimeInfos,
-}
-impl AppAuth {
-    pub fn from_config(params: TurnipApiParams) -> Self {
-        let mut validation = jsonwebtoken::Validation::new(TOKEN_ALGORITHM);
-        // We manually validate the EXP so we don't need to worry about dependency-injecting time at test time
-        validation.validate_exp = false;
-        validation.set_audience(&[TURNIP_API_AUD]);
-        validation.set_required_spec_claims(&["app_id", "exp", "aud", "sub"]);
-
-        Self {
-            dec_key: DecodingKey::from_base64_secret(&params.key_base64)
-                .expect("Failed to decode key base64"),
-            enc_key: EncodingKey::from_base64_secret(&params.key_base64)
-                .expect("Failed to decode key base64"),
-            validation,
-            app_runtimes: AppRuntimeInfos::new(params.apps),
-        }
-    }
-
-    /// Given a JWT token, validate it against the App ID it claims to have
-    /// and what ApiTarget endpoint it's been sent to, and increment the number of requests
-    /// (assuming you aren't going over the request limit)
-    pub fn validate_request(
-        &self,
-        token_str: &str,
-        target: ApiTarget,
-        utc_timestamp: u64,
-    ) -> Result<(), ValidateTokenError> {
-        let key = &self.dec_key;
-        let token: TokenData<TurnipApiClaim> =
-            jsonwebtoken::decode(token_str, key, &self.validation).map_err(|err| {
-                match err.kind() {
-                    jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-                        // This should never happen because we tell the validator to not check the timeout leeway
-                        ValidateTokenError::ClaimHasExpired
-                    }
-                    jsonwebtoken::errors::ErrorKind::InvalidAudience => {
-                        ValidateTokenError::ClaimHasBadAudience
-                    }
-                    _ => ValidateTokenError::JwtError(err),
-                }
-            })?;
-        if token.claims.exp + TOKEN_TIMEOUT_LEEWAY < utc_timestamp {
-            return Err(ValidateTokenError::ClaimHasExpired);
-        }
-        match self.app_runtimes.get_app_runtime(&token.claims.app_id) {
-            Some(app_runtime) => {
-                let app_runtime = app_runtime.read().expect("Poisoned lock somehow");
-                app_runtime.validate_request(token_str, target)
-            }
-            None => Err(ValidateTokenError::ClaimHasInvalidAppId),
-        }
-    }
-    /// Given an App ID, generate a new token for it (if it has spare outstanding claims)
-    pub fn generate_token(
-        &self,
-        app_id: &str,
-        utc_timestamp: u64,
-    ) -> Result<String, GenerateTokenError> {
-        let key = &self.enc_key;
-        match self.app_runtimes.get_app_runtime(app_id) {
-            Some(app_runtime) => {
-                let mut app_runtime = app_runtime.write().expect("Poisoned lock somehow");
-                app_runtime.generate_token(key, utc_timestamp)
-            }
-            None => Err(GenerateTokenError::BadAppId),
-        }
-    }
-    // TODO renew tokens?
-}
-
 #[cfg(test)]
 pub mod test {
     use std::{
@@ -351,7 +286,8 @@ pub mod test {
     use jsonwebtoken::TokenData;
 
     use super::{
-        ApiAppParams, ApiTarget, AppAuth, TurnipApiClaim, TurnipApiParams, TOKEN_TIMEOUT_LEEWAY,
+        ApiTarget, AppAuth, AppAuthParams, PerAppParams, TurnipApiClaim,
+        TURNIP_API_CLAIM_TIMEOUT_LEEWAY,
     };
 
     const MAX_OUTSTANDING_CLAIMS: usize = 150;
@@ -359,13 +295,13 @@ pub mod test {
     const CLAIM_TIMEOUT_S: u64 = 15 * 60;
 
     fn test_env() -> AppAuth {
-        AppAuth::from_config(TurnipApiParams {
+        AppAuth::from_config(AppAuthParams {
             // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
             key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
             apps: HashMap::from([
                 (
                     "app1".to_string(),
-                    ApiAppParams {
+                    PerAppParams {
                         api: ApiTarget::RundownV1,
                         max_outstanding_claims: MAX_OUTSTANDING_CLAIMS,
                         max_requests_per_claim: MAX_REQUESTS_PER_CLAIM,
@@ -378,7 +314,7 @@ pub mod test {
 
     #[test]
     fn test_deserialize_env() {
-        let deserialized: TurnipApiParams = serde_json::from_str(r#"
+        let deserialized: AppAuthParams = serde_json::from_str(r#"
         {
             "key_base64": "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==",
             "apps": {
@@ -399,13 +335,13 @@ pub mod test {
         "#).unwrap();
 
         assert_eq!(
-            deserialized, TurnipApiParams {
+            deserialized, AppAuthParams {
             // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
             key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
             apps: HashMap::from([
                 (
                     "app1".to_string(),
-                    ApiAppParams {
+                    PerAppParams {
                         api: ApiTarget::RundownV1,
                         max_outstanding_claims: MAX_OUTSTANDING_CLAIMS,
                         max_requests_per_claim: MAX_REQUESTS_PER_CLAIM,
@@ -414,7 +350,7 @@ pub mod test {
                 ),
                 (
                     "app2".to_string(),
-                    ApiAppParams {
+                    PerAppParams {
                         api: ApiTarget::Dummy,
                         max_outstanding_claims: 1,
                         max_requests_per_claim: 2,
@@ -524,7 +460,7 @@ pub mod test {
             .validate_request(&token, ApiTarget::RundownV1, 0)
             .expect("Should be able to validate token immediately");
         // We should also be able to validate tokens up to and including timeout + the clock leeway
-        for l in 0..TOKEN_TIMEOUT_LEEWAY {
+        for l in 0..TURNIP_API_CLAIM_TIMEOUT_LEEWAY {
             app_auth
                 .validate_request(&token, ApiTarget::RundownV1, 0 + CLAIM_TIMEOUT_S + l)
                 .expect("Should be able to validate token when within leeway");
@@ -534,7 +470,7 @@ pub mod test {
             .validate_request(
                 &token,
                 ApiTarget::RundownV1,
-                0 + CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + 1,
+                0 + CLAIM_TIMEOUT_S + TURNIP_API_CLAIM_TIMEOUT_LEEWAY + 1,
             )
             .expect_err("Should not be able to validate token when outside leeway");
     }
@@ -575,7 +511,9 @@ pub mod test {
             app_auth
                 .generate_token(
                     "app1",
-                    CLAIM_TIMEOUT_S + TOKEN_TIMEOUT_LEEWAY + TOKEN_ISSUE_OFFSET * (i as u64),
+                    CLAIM_TIMEOUT_S
+                        + TURNIP_API_CLAIM_TIMEOUT_LEEWAY
+                        + TOKEN_ISSUE_OFFSET * (i as u64),
                 )
                 .expect("Should not fail to generate tokens second time around");
         }
