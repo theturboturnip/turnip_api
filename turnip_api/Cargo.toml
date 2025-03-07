@@ -9,5 +9,6 @@ geojson = "0.24.1"
 jsonwebtoken = "9.3.1"
 lazy_static = "1.5.0"
 rand_chacha = { version = "0.9.0", features = ["os_rng", "std"] }
+rustc-hash = "2.1.1"
 serde = "1.0.218"
 serde_json = "1.0.139"

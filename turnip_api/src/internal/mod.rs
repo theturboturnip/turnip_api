@@ -10,6 +10,7 @@ use bimap::BiBTreeMap;
 use jsonwebtoken::{DecodingKey, EncodingKey, TokenData};
 use lazy_static::lazy_static;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::{
     de::{Expected, Visitor},
     Deserialize, Serialize,
@@ -33,9 +34,6 @@ fn gen_api_target_to_str() -> BiBTreeMap<ApiTarget, &'static str> {
 lazy_static! {
     static ref API_TARGET_STR: BiBTreeMap<ApiTarget, &'static str> = gen_api_target_to_str();
 }
-
-// TODO make this use a fast hash
-type FastHashMap<L, R> = HashMap<L, R>;
 
 impl Serialize for ApiTarget {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -85,6 +83,27 @@ impl<'de> Deserialize<'de> for ApiTarget {
     }
 }
 
+/// Mapping of app-ids to the runtime information about that app.
+/// This is always indexed by valid app strings - or at least not user-controlled strings.
+/// We pass in the appid from known-valid JWTs, and we are the only people who can create them.
+/// That means we can use a fast hash map without worrying about HashDos attacks.
+struct AppIdMap(FxHashMap<String, RwLock<ApiAppRuntimeInfo>>);
+impl AppIdMap {
+    fn new(apps: HashMap<String, ApiAppParams>) -> Self {
+        let mut map = FxHashMap::default();
+        map.extend(apps.into_iter().map(|(app_id, params)| {
+            (
+                app_id.clone(),
+                RwLock::new(ApiAppRuntimeInfo::new(app_id, params)),
+            )
+        }));
+        Self(map)
+    }
+    fn get_app(&self, key: &str) -> Option<&RwLock<ApiAppRuntimeInfo>> {
+        self.0.get(key)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct ApiAppParams {
     /// The API target this app can use
@@ -101,7 +120,7 @@ pub struct ApiAppParams {
 pub struct TurnipApiParams {
     /// The key used to generate and validate API claims with the HMAC-SHA-256 scheme
     key_base64: String,
-    apps: FastHashMap<String, ApiAppParams>,
+    apps: HashMap<String, ApiAppParams>,
 }
 
 type SecureRng = rand_chacha::ChaCha20Rng;
@@ -110,12 +129,25 @@ struct ApiAppRuntimeInfo {
     app_id: String,
     params: ApiAppParams,
     /// Mapping of (Claim GUID -> number of requests, timeout)
-    outstanding_claims: RwLock<FastHashMap<String, OutstandingClaimInfo>>,
+    /// Only used on verified claims, which we generate, so can be a fast hash map
+    /// TODO probably remove the RwLock - do we ever need it in a way we don't already have the lock around this?
+    outstanding_claims: RwLock<FxHashMap<String, OutstandingClaimInfo>>,
     /// Secure RNG used for generating the random Subject for each token
     rand: SecureRng,
 }
 
 impl ApiAppRuntimeInfo {
+    fn new(app_id: String, params: ApiAppParams) -> Self {
+        Self {
+            app_id,
+            params,
+            outstanding_claims: RwLock::new(FxHashMap::with_capacity_and_hasher(
+                params.max_outstanding_claims,
+                FxBuildHasher::default(),
+            )),
+            rand: SecureRng::from_os_rng(),
+        }
+    }
     fn validate_request(
         &self,
         token_str: &str,
@@ -245,7 +277,7 @@ pub struct Apps {
     dec_key: jsonwebtoken::DecodingKey,
     enc_key: jsonwebtoken::EncodingKey,
     validation: jsonwebtoken::Validation,
-    apps: FastHashMap<String, RwLock<ApiAppRuntimeInfo>>,
+    apps: AppIdMap,
 }
 impl Apps {
     pub fn from_config(params: TurnipApiParams) -> Self {
@@ -261,17 +293,7 @@ impl Apps {
             enc_key: EncodingKey::from_base64_secret(&params.key_base64)
                 .expect("Failed to decode key base64"),
             validation,
-            apps: FastHashMap::from_iter(params.apps.into_iter().map(|(app_key, app_params)| {
-                (
-                    app_key.clone(),
-                    RwLock::new(ApiAppRuntimeInfo {
-                        params: app_params,
-                        outstanding_claims: RwLock::new(FastHashMap::new()),
-                        rand: SecureRng::from_os_rng(),
-                        app_id: app_key,
-                    }),
-                )
-            })),
+            apps: AppIdMap::new(params.apps),
         }
     }
 
@@ -301,7 +323,7 @@ impl Apps {
         if token.claims.exp + TOKEN_TIMEOUT_LEEWAY < utc_timestamp {
             return Err(ValidateTokenError::ClaimHasExpired);
         }
-        match self.apps.get(&token.claims.app_id) {
+        match self.apps.get_app(&token.claims.app_id) {
             Some(app) => {
                 let app = app.read().expect("Poisoned lock somehow");
                 app.validate_request(token_str, target)
@@ -316,7 +338,7 @@ impl Apps {
         utc_timestamp: u64,
     ) -> Result<String, GenerateTokenError> {
         let key = &self.enc_key;
-        match self.apps.get(app_id) {
+        match self.apps.get_app(app_id) {
             Some(app) => {
                 let mut app = app.write().expect("Poisoned lock somehow");
                 app.generate_token(key, utc_timestamp)
@@ -329,13 +351,12 @@ impl Apps {
 
 #[cfg(test)]
 pub mod test {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use jsonwebtoken::TokenData;
 
     use super::{
-        ApiAppParams, ApiTarget, Apps, FastHashMap, TurnipApiClaim, TurnipApiParams,
-        TOKEN_TIMEOUT_LEEWAY,
+        ApiAppParams, ApiTarget, Apps, TurnipApiClaim, TurnipApiParams, TOKEN_TIMEOUT_LEEWAY,
     };
 
     const MAX_OUTSTANDING_CLAIMS: usize = 150;
@@ -346,7 +367,7 @@ pub mod test {
         Apps::from_config(TurnipApiParams {
             // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
             key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
-            apps: FastHashMap::from([
+            apps: HashMap::from([
                 (
                     "app1".to_string(),
                     ApiAppParams {
