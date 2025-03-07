@@ -343,7 +343,10 @@ impl Apps {
 
 #[cfg(test)]
 pub mod test {
-    use std::collections::{HashMap, HashSet};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    };
 
     use jsonwebtoken::TokenData;
 
@@ -405,6 +408,57 @@ pub mod test {
         // Make another claim, which should fail
         apps.generate_token("app1", 0)
             .expect_err("Should fail to make too many");
+    }
+
+    #[test]
+    fn must_only_allow_up_to_max_outstanding_claims_multithreaded() {
+        let apps = test_env();
+
+        const N_THREADS: usize = 64;
+        const N_GENERATIONS_PER_THREAD: usize = MAX_OUTSTANDING_CLAIMS / N_THREADS + 5;
+        const N_TOTAL_CLAIMS: usize = N_GENERATIONS_PER_THREAD * N_THREADS;
+        assert!(N_TOTAL_CLAIMS > MAX_OUTSTANDING_CLAIMS);
+
+        let go_flag = AtomicBool::new(false);
+        let n_successes = AtomicUsize::new(0);
+        let n_fails = AtomicUsize::new(0);
+
+        std::thread::scope(|scope| {
+            let mut thread_handles = vec![];
+            for _ in 0..N_THREADS {
+                thread_handles.push(scope.spawn(|| {
+                    while !go_flag.load(Ordering::Acquire) {}
+
+                    for _ in 0..N_GENERATIONS_PER_THREAD {
+                        match apps.generate_token("app1", 0) {
+                            Ok(_) => n_successes.fetch_add(1, Ordering::AcqRel),
+                            Err(_) => n_fails.fetch_add(1, Ordering::AcqRel),
+                        };
+                    }
+                }));
+            }
+
+            // start the threads off
+            go_flag.store(true, Ordering::Release);
+
+            for handle in thread_handles {
+                handle.join().expect("Failed to join thread");
+            }
+        });
+
+        assert_eq!(n_successes.load(Ordering::Acquire), MAX_OUTSTANDING_CLAIMS);
+        assert_eq!(
+            n_fails.load(Ordering::Acquire),
+            N_TOTAL_CLAIMS - MAX_OUTSTANDING_CLAIMS
+        );
+        let claims = &apps
+            .apps
+            .get_app("app1")
+            .unwrap()
+            .read()
+            .unwrap()
+            .outstanding_claims;
+        assert_eq!(claims.len(), MAX_OUTSTANDING_CLAIMS);
     }
 
     #[test]
@@ -470,7 +524,7 @@ pub mod test {
     }
 
     #[test]
-    fn must_allow_up_to_n_token_usages() {
+    fn must_allow_up_to_n_token_requests() {
         let apps = test_env();
 
         let token = apps
@@ -485,7 +539,65 @@ pub mod test {
         apps.validate_request(&token, ApiTarget::RundownV1, 1)
             .expect_err("Should fail to use a token too many times");
     }
-    // TODO must_allow_up_to_n_token_usages_multithreaded
+
+    #[test]
+    fn must_allow_up_to_n_token_requests_multithreaded() {
+        let apps = test_env();
+
+        let token = apps
+            .generate_token("app1", 0)
+            .expect("Should not fail to generate token");
+
+        const N_THREADS: u64 = 64;
+        const N_TOKEN_REQUESTS_PER_THREAD: u64 = MAX_REQUESTS_PER_CLAIM / N_THREADS + 5;
+        const N_TOTAL_REQUESTS: u64 = N_TOKEN_REQUESTS_PER_THREAD * N_THREADS;
+        assert!(N_TOTAL_REQUESTS > MAX_REQUESTS_PER_CLAIM);
+
+        let go_flag = AtomicBool::new(false);
+        let n_successes = AtomicU64::new(0);
+        let n_fails = AtomicU64::new(0);
+
+        std::thread::scope(|scope| {
+            let mut thread_handles = vec![];
+            for _ in 0..N_THREADS {
+                thread_handles.push(scope.spawn(|| {
+                    while !go_flag.load(Ordering::Acquire) {}
+
+                    for _ in 0..N_TOKEN_REQUESTS_PER_THREAD {
+                        match apps.validate_request(&token, ApiTarget::RundownV1, 0) {
+                            Ok(_) => n_successes.fetch_add(1, Ordering::AcqRel),
+                            Err(_) => n_fails.fetch_add(1, Ordering::AcqRel),
+                        };
+                    }
+                }));
+            }
+
+            // start the threads off
+            go_flag.store(true, Ordering::Release);
+
+            for handle in thread_handles {
+                handle.join().expect("Failed to join thread");
+            }
+        });
+
+        assert_eq!(n_successes.load(Ordering::Acquire), MAX_REQUESTS_PER_CLAIM);
+        assert_eq!(
+            n_fails.load(Ordering::Acquire),
+            N_TOTAL_REQUESTS - MAX_REQUESTS_PER_CLAIM
+        );
+        let claims = &apps
+            .apps
+            .get_app("app1")
+            .unwrap()
+            .read()
+            .unwrap()
+            .outstanding_claims;
+        assert_eq!(claims.len(), 1);
+        assert_eq!(
+            claims.get(&token).unwrap().requests.load(Ordering::Acquire),
+            MAX_REQUESTS_PER_CLAIM
+        );
+    }
 
     #[test]
     fn overused_tokens_must_still_prevent_new_tokens() {
@@ -514,7 +626,7 @@ pub mod test {
         }
         // The final token should be completely used up
         apps.validate_request(&final_token, ApiTarget::RundownV1, 0)
-            .expect_err("Should be too many usages");
+            .expect_err("Should be too many requests");
 
         // ...but the final token being used up shouldn't allow us to suddenly create another one
         apps.generate_token("app1", 0)
