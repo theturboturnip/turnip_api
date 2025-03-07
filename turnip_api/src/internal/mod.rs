@@ -6,9 +6,7 @@ use std::{
     },
 };
 
-use bimap::BiBTreeMap;
 use jsonwebtoken::{DecodingKey, EncodingKey, TokenData};
-use lazy_static::lazy_static;
 use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::{
@@ -17,22 +15,27 @@ use serde::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(usize)]
 pub enum ApiTarget {
     RundownV1,
-    #[cfg(test)]
     Dummy,
 }
-
-fn gen_api_target_to_str() -> BiBTreeMap<ApiTarget, &'static str> {
-    let mut map = BiBTreeMap::new();
-    map.insert(ApiTarget::RundownV1, "turnip_rundown/v1");
-    #[cfg(test)]
-    map.insert(ApiTarget::Dummy, "dummy");
-    map
+const API_TARGET_TO_STR: [&'static str; 2] = ["turnip_rundown/v1", "dummy"];
+impl From<ApiTarget> for &'static str {
+    fn from(value: ApiTarget) -> Self {
+        API_TARGET_TO_STR[value as usize]
+    }
 }
-
-lazy_static! {
-    static ref API_TARGET_STR: BiBTreeMap<ApiTarget, &'static str> = gen_api_target_to_str();
+impl ApiTarget {
+    fn try_from_str(s: &str) -> Option<Self> {
+        match s {
+            val if (val == API_TARGET_TO_STR[ApiTarget::RundownV1 as usize]) => {
+                Some(ApiTarget::RundownV1)
+            }
+            val if (val == API_TARGET_TO_STR[ApiTarget::Dummy as usize]) => Some(ApiTarget::Dummy),
+            _ => None,
+        }
+    }
 }
 
 impl Serialize for ApiTarget {
@@ -40,7 +43,7 @@ impl Serialize for ApiTarget {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(API_TARGET_STR.get_by_left(self).unwrap())
+        serializer.serialize_str((*self).into())
     }
 }
 impl<'de> Deserialize<'de> for ApiTarget {
@@ -52,7 +55,7 @@ impl<'de> Deserialize<'de> for ApiTarget {
         impl Expected for ExpectedApiTarget {
             fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(formatter, "one of")?;
-                for str in API_TARGET_STR.right_values() {
+                for str in API_TARGET_TO_STR {
                     write!(formatter, " '{str}'")?;
                 }
                 Ok(())
@@ -69,13 +72,10 @@ impl<'de> Deserialize<'de> for ApiTarget {
             where
                 E: serde::de::Error,
             {
-                API_TARGET_STR
-                    .get_by_right(v)
-                    .ok_or(serde::de::Error::invalid_value(
-                        serde::de::Unexpected::Str(v),
-                        &ExpectedApiTarget,
-                    ))
-                    .copied()
+                ApiTarget::try_from_str(v).ok_or(serde::de::Error::invalid_value(
+                    serde::de::Unexpected::Str(v),
+                    &ExpectedApiTarget,
+                ))
             }
         }
 
@@ -104,7 +104,7 @@ impl AppIdMap {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct ApiAppParams {
     /// The API target this app can use
     api: ApiTarget,
@@ -116,7 +116,7 @@ pub struct ApiAppParams {
     claim_timeout_s: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TurnipApiParams {
     /// The key used to generate and validate API claims with the HMAC-SHA-256 scheme
     key_base64: String,
@@ -374,6 +374,55 @@ pub mod test {
                 )
             ])
         })
+    }
+
+    #[test]
+    fn test_deserialize_env() {
+        let deserialized: TurnipApiParams = serde_json::from_str(r#"
+        {
+            "key_base64": "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==",
+            "apps": {
+                "app1": {
+                    "api": "turnip_rundown/v1",
+                    "max_outstanding_claims": 150,
+                    "max_requests_per_claim": 100,
+                    "claim_timeout_s": 900
+                },
+                "app2": {
+                    "api": "dummy",
+                    "max_outstanding_claims": 1,
+                    "max_requests_per_claim": 2,
+                    "claim_timeout_s": 3
+                }
+            }
+        }
+        "#).unwrap();
+
+        assert_eq!(
+            deserialized, TurnipApiParams {
+            // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
+            key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
+            apps: HashMap::from([
+                (
+                    "app1".to_string(),
+                    ApiAppParams {
+                        api: ApiTarget::RundownV1,
+                        max_outstanding_claims: MAX_OUTSTANDING_CLAIMS,
+                        max_requests_per_claim: MAX_REQUESTS_PER_CLAIM,
+                        claim_timeout_s: CLAIM_TIMEOUT_S,
+                    }
+                ),
+                (
+                    "app2".to_string(),
+                    ApiAppParams {
+                        api: ApiTarget::Dummy,
+                        max_outstanding_claims: 1,
+                        max_requests_per_claim: 2,
+                        claim_timeout_s: 3,
+                    }
+                ),
+            ])
+        });
     }
 
     #[test]
