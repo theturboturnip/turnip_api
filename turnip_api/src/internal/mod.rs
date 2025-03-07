@@ -130,8 +130,7 @@ struct ApiAppRuntimeInfo {
     params: ApiAppParams,
     /// Mapping of (Claim GUID -> number of requests, timeout)
     /// Only used on verified claims, which we generate, so can be a fast hash map
-    /// TODO probably remove the RwLock - do we ever need it in a way we don't already have the lock around this?
-    outstanding_claims: RwLock<FxHashMap<String, OutstandingClaimInfo>>,
+    outstanding_claims: FxHashMap<String, OutstandingClaimInfo>,
     /// Secure RNG used for generating the random Subject for each token
     rand: SecureRng,
 }
@@ -141,10 +140,10 @@ impl ApiAppRuntimeInfo {
         Self {
             app_id,
             params,
-            outstanding_claims: RwLock::new(FxHashMap::with_capacity_and_hasher(
+            outstanding_claims: FxHashMap::with_capacity_and_hasher(
                 params.max_outstanding_claims,
                 FxBuildHasher::default(),
-            )),
+            ),
             rand: SecureRng::from_os_rng(),
         }
     }
@@ -160,11 +159,7 @@ impl ApiAppRuntimeInfo {
             });
         }
 
-        let claims = self
-            .outstanding_claims
-            .read()
-            .expect("Poisoned lock somehow");
-        if let Some(claim) = claims.get(token_str) {
+        if let Some(claim) = self.outstanding_claims.get(token_str) {
             // TODO check those atomics
             match claim
                 .requests
@@ -187,23 +182,20 @@ impl ApiAppRuntimeInfo {
         key: &EncodingKey,
         utc_timestamp: u64,
     ) -> Result<String, GenerateTokenError> {
-        let mut claims = self
-            .outstanding_claims
-            .write()
-            .expect("Poisoned lock somehow");
         // If we know about more claims than the app supports at a time,
         // do a sweep to remove outdated ones and check again.
         // TODO: under heavy load doing a whole scan over and over might be too expensive. maintain a "next timeout" timestamp
         // and only scan once that's passed
-        if claims.len() >= self.params.max_outstanding_claims {
+        if self.outstanding_claims.len() >= self.params.max_outstanding_claims {
             // Remove where timeout < timestamp, i.e. retain where timeout > timestamp
             // Use (timeout+leeway) to ensure that we leave things alive for long enough to handle clock skew
-            claims.retain(|_token, outstanding_claim_info| {
-                outstanding_claim_info.timeout + TOKEN_TIMEOUT_LEEWAY > utc_timestamp
-                // Don't do this :)
-                // && outstanding_claim_info.uses.load(Ordering::SeqCst) < self.params.max_uses_per_claim
-            });
-            if claims.len() >= self.params.max_outstanding_claims {
+            self.outstanding_claims
+                .retain(|_token, outstanding_claim_info| {
+                    outstanding_claim_info.timeout + TOKEN_TIMEOUT_LEEWAY > utc_timestamp
+                    // Don't do this :)
+                    // && outstanding_claim_info.uses.load(Ordering::SeqCst) < self.params.max_uses_per_claim
+                });
+            if self.outstanding_claims.len() >= self.params.max_outstanding_claims {
                 return Err(GenerateTokenError::AppHasTooManyOutstandingClaims);
             }
         }
@@ -218,7 +210,7 @@ impl ApiAppRuntimeInfo {
         let encoded =
             jsonwebtoken::encode(&jsonwebtoken::Header::new(TOKEN_ALGORITHM), &claim, &key)
                 .map_err(|err| GenerateTokenError::JwtError(err))?;
-        claims.insert(
+        self.outstanding_claims.insert(
             encoded.clone(),
             OutstandingClaimInfo {
                 requests: AtomicU64::new(0),
