@@ -11,8 +11,9 @@ use rand_chacha::rand_core::{RngCore, SeedableRng};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use serde::{Deserialize, Serialize};
 
-mod api_target;
-pub use api_target::ApiTarget;
+use crate::endpoints::ApiTarget;
+
+use super::{AppAuth, AppAuthParams, GenerateTokenError, PerAppParams, ValidateTokenError};
 
 const TURNIP_API_AUD: &'static str = "turnip_api";
 const TURNIP_API_CLAIM_ALGORITHM: jsonwebtoken::Algorithm = jsonwebtoken::Algorithm::HS256;
@@ -32,55 +33,14 @@ struct TurnipApiClaim {
     sub: String,
 }
 
-#[derive(Debug, Clone)]
-pub enum GenerateTokenError {
-    JwtError(jsonwebtoken::errors::Error),
-    BadAppId,
-    AppHasTooManyOutstandingClaims,
-}
-
-#[derive(Debug, Clone)]
-pub enum ValidateTokenError {
-    JwtError(jsonwebtoken::errors::Error),
-    // Either the app doesn't exist or the app doesn't know about this claim
-    ClaimHasInvalidAppId,
-    ClaimHasExpired,
-    ClaimHasBadAudience,
-    ClaimTargetsIncorrectApi {
-        api_claimed: ApiTarget,
-        api_requested: ApiTarget,
-    },
-    ClaimExceedsUses,
-}
-
-/// Top-level parameters structure used for initializing
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AppAuthParams {
-    /// The key used to generate and validate API claims with the HMAC-SHA-256 scheme
-    key_base64: String,
-    apps: HashMap<String, PerAppParams>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub struct PerAppParams {
-    /// The API target this app can use
-    api: ApiTarget,
-    /// The maximum amount of claims we will generate for this app at this time
-    max_outstanding_claims: usize,
-    /// The maximum amount of uses we allow per claim, to avoid one claim starving out all the others
-    max_requests_per_claim: u64,
-    /// The duration of time (in seconds) that new claims are given before they time out
-    claim_timeout_s: u64,
-}
-
-pub struct AppAuth {
+pub struct JwtAppAuth {
     dec_key: jsonwebtoken::DecodingKey,
     enc_key: jsonwebtoken::EncodingKey,
     validation: jsonwebtoken::Validation,
     app_runtimes: AppRuntimeInfos,
 }
-impl AppAuth {
-    pub fn from_config(params: AppAuthParams) -> Self {
+impl AppAuth for JwtAppAuth {
+    fn from_config(params: AppAuthParams) -> Self {
         let mut validation = jsonwebtoken::Validation::new(TURNIP_API_CLAIM_ALGORITHM);
         // We manually validate the EXP so we don't need to worry about dependency-injecting time at test time
         validation.validate_exp = false;
@@ -100,7 +60,7 @@ impl AppAuth {
     /// Given a JWT token, validate it against the App ID it claims to have
     /// and what ApiTarget endpoint it's been sent to, and increment the number of requests
     /// (assuming you aren't going over the request limit)
-    pub fn validate_request(
+    fn validate_request(
         &self,
         token_str: &str,
         target: ApiTarget,
@@ -132,7 +92,7 @@ impl AppAuth {
         }
     }
     /// Given an App ID, generate a new token for it (if it has spare outstanding claims)
-    pub fn generate_token(
+    fn generate_token(
         &self,
         app_id: &str,
         utc_timestamp: u64,
@@ -146,7 +106,6 @@ impl AppAuth {
             None => Err(GenerateTokenError::BadAppId),
         }
     }
-    // TODO renew tokens?
 }
 
 /// Mapping of app-ids to the runtime information about that app.
@@ -286,7 +245,7 @@ pub mod test {
     use jsonwebtoken::TokenData;
 
     use super::{
-        ApiTarget, AppAuth, AppAuthParams, PerAppParams, TurnipApiClaim,
+        ApiTarget, AppAuth, AppAuthParams, JwtAppAuth, PerAppParams, TurnipApiClaim,
         TURNIP_API_CLAIM_TIMEOUT_LEEWAY,
     };
 
@@ -294,7 +253,7 @@ pub mod test {
     const MAX_REQUESTS_PER_CLAIM: u64 = 100;
     const CLAIM_TIMEOUT_S: u64 = 15 * 60;
 
-    fn test_env() -> AppAuth {
+    fn test_env() -> JwtAppAuth {
         AppAuth::from_config(AppAuthParams {
             // deadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEFdeadbeefDEADBEEF
             key_base64: "ZGVhZGJlZWZERUFEQkVFRmRlYWRiZWVmREVBREJFRUZkZWFkYmVlZkRFQURCRUVGZGVhZGJlZWZERUFEQkVFRg==".to_string(),
