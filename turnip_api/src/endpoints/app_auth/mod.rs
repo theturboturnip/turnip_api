@@ -1,12 +1,21 @@
-use super::ApiTarget;
+use super::{ApiTarget, HttpError};
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-pub mod dummy;
 pub mod jwt;
+
+/// A 0-size struct that can only be constructed through [AppAuth::validate_request].
+/// i.e. you can only receive this token with a successfully authorized token.
+/// This means API endpoint functions can enforce authorization without calling into AppAuth themselves.
+/// TODO: make this preserve ApiTarget info?
+#[derive(Debug, Clone, Copy)]
+pub struct IsAuthed(());
+/// A pre-constructed IsAuthed token to be used ONLY IN UNIT TESTS
+/// where the goal is to test the authorized API
+#[cfg(test)]
+pub const DUMMY_IS_AUTHED: IsAuthed = IsAuthed(());
 
 pub trait AppAuth {
     fn from_config(params: AppAuthParams) -> Self;
@@ -19,7 +28,7 @@ pub trait AppAuth {
         token_str: &str,
         target: ApiTarget,
         utc_timestamp: u64,
-    ) -> Result<(), ValidateTokenError>;
+    ) -> Result<IsAuthed, ValidateTokenError>;
     /// Given an App ID, generate a new token for it (if it has spare outstanding claims)
     fn generate_token(
         &self,
@@ -36,6 +45,22 @@ pub enum GenerateTokenError {
     AppHasTooManyOutstandingClaims,
 }
 
+impl From<GenerateTokenError> for HttpError {
+    fn from(value: GenerateTokenError) -> Self {
+        let status = match &value {
+            GenerateTokenError::JwtError(_) => http::StatusCode::INTERNAL_SERVER_ERROR,
+            GenerateTokenError::BadAppId => http::StatusCode::NOT_FOUND,
+            GenerateTokenError::AppHasTooManyOutstandingClaims => {
+                http::StatusCode::SERVICE_UNAVAILABLE
+            }
+        };
+        HttpError {
+            status,
+            debug_log: format!("{:?}", value),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ValidateTokenError {
     JwtError(jsonwebtoken::errors::Error),
@@ -48,6 +73,22 @@ pub enum ValidateTokenError {
         api_requested: ApiTarget,
     },
     ClaimExceedsUses,
+}
+impl From<ValidateTokenError> for HttpError {
+    fn from(value: ValidateTokenError) -> Self {
+        let status = match &value {
+            ValidateTokenError::JwtError(_) => http::StatusCode::UNAUTHORIZED,
+            ValidateTokenError::ClaimHasInvalidAppId => http::StatusCode::UNAUTHORIZED,
+            ValidateTokenError::ClaimHasExpired => http::StatusCode::UNAUTHORIZED,
+            ValidateTokenError::ClaimHasBadAudience => http::StatusCode::UNAUTHORIZED,
+            ValidateTokenError::ClaimTargetsIncorrectApi { .. } => http::StatusCode::UNAUTHORIZED,
+            ValidateTokenError::ClaimExceedsUses => http::StatusCode::TOO_MANY_REQUESTS,
+        };
+        HttpError {
+            status,
+            debug_log: format!("{:?}", value),
+        }
+    }
 }
 
 /// Top-level parameters structure used for initializing

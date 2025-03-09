@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::endpoints::ApiTarget;
 
-use super::{AppAuth, AppAuthParams, GenerateTokenError, PerAppParams, ValidateTokenError};
+use super::{
+    AppAuth, AppAuthParams, GenerateTokenError, IsAuthed, PerAppParams, ValidateTokenError,
+};
 
 const TURNIP_API_AUD: &'static str = "turnip_api";
 const TURNIP_API_CLAIM_ALGORITHM: jsonwebtoken::Algorithm = jsonwebtoken::Algorithm::HS256;
@@ -65,7 +67,7 @@ impl AppAuth for JwtAppAuth {
         token_str: &str,
         target: ApiTarget,
         utc_timestamp: u64,
-    ) -> Result<(), ValidateTokenError> {
+    ) -> Result<IsAuthed, ValidateTokenError> {
         let key = &self.dec_key;
         let token: TokenData<TurnipApiClaim> =
             jsonwebtoken::decode(token_str, key, &self.validation).map_err(|err| {
@@ -157,7 +159,7 @@ impl PerAppRuntimeInfo {
         &self,
         token_str: &str,
         target: ApiTarget,
-    ) -> Result<(), ValidateTokenError> {
+    ) -> Result<IsAuthed, ValidateTokenError> {
         if self.params.api != target {
             return Err(ValidateTokenError::ClaimTargetsIncorrectApi {
                 api_claimed: self.params.api,
@@ -176,7 +178,7 @@ impl PerAppRuntimeInfo {
                         Some(x + 1)
                     }
                 }) {
-                Ok(_prev_val) => Ok(()),
+                Ok(_prev_val) => Ok(IsAuthed(())),
                 Err(_prev_val) => Err(ValidateTokenError::ClaimExceedsUses),
             }
         } else {

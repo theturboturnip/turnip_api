@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 geojson = "0.24.1"
+http = "1.2.0"
 jsonwebtoken = "9.3.1"
 rand_chacha = { version = "0.9.0", features = ["os_rng", "std"] }
 rustc-hash = "2.1.1"
