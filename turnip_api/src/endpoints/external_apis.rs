@@ -32,7 +32,7 @@ impl<T> Deref for CacheLine<T> {
     }
 }
 
-struct ExternalApiRateLimiter {
+struct ExternalApiQuota {
     // Read-only
     params: ExternalApiParams,
     quota_period_start: std::time::Instant,
@@ -45,15 +45,15 @@ struct ExternalApiRateLimiter {
 
     // This is only ever atomically incremented, so will have low contention
     tickets_issued: AtomicU64,
-    // This is constantly read & infrequently written, so put it on a separate cache line
+    // This is constantly read & infrequently written, so it will have high contention. put it on a separate cache line
     next_ticket: CacheLine<AtomicU64>,
 }
 
-enum ExternalApiRateLimitError {
+enum QuotaError {
     ExceededQuota,
 }
 
-impl ExternalApiRateLimiter {
+impl ExternalApiQuota {
     pub fn from_params(params: ExternalApiParams) -> Self {
         Self {
             quota_period_start: std::time::Instant::now(),
@@ -65,7 +65,7 @@ impl ExternalApiRateLimiter {
         }
     }
 
-    pub fn perform_rate_limited_action<T, F>(&self, f: F) -> Result<T, ExternalApiRateLimitError>
+    pub fn perform_rate_limited_action<T, F>(&self, f: F) -> Result<T, QuotaError>
     where
         F: FnOnce(&str) -> T,
     {
@@ -117,7 +117,7 @@ impl ExternalApiRateLimiter {
                 let val = f(&self.params.key);
                 Ok(val)
             }
-            Err(_zero) => Err(ExternalApiRateLimitError::ExceededQuota),
+            Err(_zero) => Err(QuotaError::ExceededQuota),
         };
         // Regardless of whether we went, let the next ticket go
         self.next_ticket.fetch_add(1, Ordering::Release);
@@ -129,13 +129,13 @@ impl ExternalApiRateLimiter {
 mod test {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-    use super::{ExternalApiParams, ExternalApiRateLimiter};
+    use super::{ExternalApiParams, ExternalApiQuota};
 
     #[test]
     fn test_rate_limiter_prevents_exceeding_quota_inside_single_period() {
         const N_CALLS_PER_QUOTA: u64 = 1000;
 
-        let rate_limiter = ExternalApiRateLimiter::from_params(ExternalApiParams {
+        let rate_limiter = ExternalApiQuota::from_params(ExternalApiParams {
             key: "".to_string(),
             call_quota_per_duration: N_CALLS_PER_QUOTA,
             call_quota_duration_s: 10,
