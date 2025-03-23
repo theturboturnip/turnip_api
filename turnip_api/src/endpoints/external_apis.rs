@@ -80,6 +80,7 @@ impl ExternalApiQuota {
             }
             // let expected_duration = self.next_ticket_utc_micros (next_ticket - ticket - 1) *
             // TODO sleep until it's likely that the next ticket is ready
+            std::thread::yield_now();
         }
         // It's our ticket's turn, check if the quote allows us to go.
         // We are the only core executing this code right now.
@@ -134,8 +135,11 @@ mod test {
         time::Duration,
     };
 
+    use serial_test::serial;
+
     use super::{ExternalApiParams, ExternalApiQuota};
 
+    #[serial]
     #[test]
     fn test_rate_limiter_prevents_exceeding_quota_inside_single_period() {
         const N_CALLS_PER_QUOTA: u64 = 1000;
@@ -188,6 +192,7 @@ mod test {
             N_TOTAL_CALLS - N_CALLS_PER_QUOTA
         );
     }
+    #[serial]
     #[test]
     fn test_quota_comes_back_after_period() {
         const N_CALLS_PER_QUOTA: u64 = 1000;
@@ -214,7 +219,9 @@ mod test {
                         Vec::with_capacity((N_CALLS_PER_QUOTA * N_QUOTA_PERIODS) as usize);
 
                     for i in 0..N_QUOTA_PERIODS {
-                        while go_flag.load(Ordering::Acquire) == i {}
+                        while go_flag.load(Ordering::Acquire) == i {
+                            std::thread::yield_now();
+                        }
 
                         for _ in 0..N_CALLS_PER_THREAD {
                             match rate_limiter.perform_rate_limited_action(|_, dur| {
@@ -258,7 +265,7 @@ mod test {
 
         dbg!(&successes_per_period);
 
-        assert_eq!(successes_per_period.len() as u64, N_QUOTA_PERIODS);
+        assert!(successes_per_period.len() as u64 == N_QUOTA_PERIODS);
         for (_second, sucesses) in successes_per_period {
             assert!(sucesses <= N_CALLS_PER_QUOTA);
         }
