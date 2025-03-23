@@ -67,7 +67,7 @@ impl ExternalApiQuota {
 
     pub fn perform_rate_limited_action<T, F>(&self, f: F) -> Result<T, QuotaError>
     where
-        F: FnOnce(&str) -> T,
+        F: FnOnce(&str, Option<std::time::Duration>) -> T,
     {
         // Take a ticket
         let ticket = self.tickets_issued.fetch_add(1, Ordering::Release);
@@ -84,12 +84,13 @@ impl ExternalApiQuota {
         // It's our ticket's turn, check if the quote allows us to go.
         // We are the only core executing this code right now.
         // Make sure we know which quota window we exist in...
-        match std::time::Instant::now().checked_duration_since(self.quota_period_start) {
+        let dur = std::time::Instant::now().checked_duration_since(self.quota_period_start);
+        match dur {
             Some(since_start) => {
                 let s_since_start = since_start.as_secs();
-                if s_since_start > self.quota_period_end_s_since_start.load(Ordering::Acquire) {
+                if s_since_start >= self.quota_period_end_s_since_start.load(Ordering::Acquire) {
                     self.quota_period_end_s_since_start.store(
-                        (s_since_start / self.params.call_quota_duration_s)
+                        ((s_since_start / self.params.call_quota_duration_s) + 1)
                             * self.params.call_quota_duration_s,
                         Ordering::Release,
                     );
@@ -114,7 +115,7 @@ impl ExternalApiQuota {
             },
         ) {
             Ok(_) => {
-                let val = f(&self.params.key);
+                let val = f(&self.params.key, dur);
                 Ok(val)
             }
             Err(_zero) => Err(QuotaError::ExceededQuota),
@@ -127,7 +128,11 @@ impl ExternalApiQuota {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::{
+        collections::HashMap,
+        sync::atomic::{AtomicBool, AtomicU64, Ordering},
+        time::Duration,
+    };
 
     use super::{ExternalApiParams, ExternalApiQuota};
 
@@ -157,7 +162,7 @@ mod test {
                     while !go_flag.load(Ordering::Acquire) {}
 
                     for _ in 0..N_CALLS_PER_THREAD {
-                        match rate_limiter.perform_rate_limited_action(|_| {
+                        match rate_limiter.perform_rate_limited_action(|_, _| {
                             n_successes.fetch_add(1, Ordering::AcqRel)
                         }) {
                             Ok(_) => {}
@@ -182,5 +187,80 @@ mod test {
             n_fails.load(Ordering::Acquire),
             N_TOTAL_CALLS - N_CALLS_PER_QUOTA
         );
+    }
+    #[test]
+    fn test_quota_comes_back_after_period() {
+        const N_CALLS_PER_QUOTA: u64 = 1000;
+
+        let rate_limiter = ExternalApiQuota::from_params(ExternalApiParams {
+            key: "".to_string(),
+            call_quota_per_duration: N_CALLS_PER_QUOTA,
+            call_quota_duration_s: 1,
+        });
+
+        const N_THREADS: u64 = 16;
+        const N_CALLS_PER_THREAD: u64 = N_CALLS_PER_QUOTA / N_THREADS + 5;
+        const N_TOTAL_CALLS: u64 = N_CALLS_PER_THREAD * N_THREADS;
+        const N_QUOTA_PERIODS: u64 = 5;
+        assert!(N_TOTAL_CALLS > N_CALLS_PER_QUOTA);
+
+        let go_flag = AtomicU64::new(0);
+
+        let joined_success_durs = std::thread::scope(|scope| {
+            let mut thread_handles = vec![];
+            for _ in 0..N_THREADS {
+                thread_handles.push(scope.spawn(|| {
+                    let mut success_durs =
+                        Vec::with_capacity((N_CALLS_PER_QUOTA * N_QUOTA_PERIODS) as usize);
+
+                    for i in 0..N_QUOTA_PERIODS {
+                        while go_flag.load(Ordering::Acquire) == i {}
+
+                        for _ in 0..N_CALLS_PER_THREAD {
+                            match rate_limiter.perform_rate_limited_action(|_, dur| {
+                                success_durs.push(dur);
+                            }) {
+                                Ok(_) => {}
+                                Err(_) => {}
+                            };
+                        }
+                    }
+
+                    success_durs
+                }));
+            }
+
+            // start the threads off
+            go_flag.store(1, Ordering::Release);
+            for i in 2..=N_QUOTA_PERIODS {
+                std::thread::sleep(Duration::from_millis(1000));
+                go_flag.store(i, Ordering::Release);
+            }
+
+            let mut joined_success_durs = vec![];
+            for handle in thread_handles {
+                joined_success_durs
+                    .extend(handle.join().expect("Failed to join thread").into_iter());
+            }
+
+            joined_success_durs
+        });
+
+        let mut successes_per_period = HashMap::new();
+
+        for success_dur in joined_success_durs {
+            let second = success_dur.unwrap().as_secs();
+            successes_per_period.insert(
+                second,
+                successes_per_period.get(&second).copied().unwrap_or(0) + 1,
+            );
+        }
+
+        dbg!(&successes_per_period);
+
+        assert_eq!(successes_per_period.len() as u64, N_QUOTA_PERIODS);
+        for (_second, sucesses) in successes_per_period {
+            assert!(sucesses <= N_CALLS_PER_QUOTA);
+        }
     }
 }
