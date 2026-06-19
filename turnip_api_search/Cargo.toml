@@ -1,0 +1,11 @@
+[package]
+name = "turnip_api_search"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+
+[dependencies]
+jiff = "0.2.18"
+smol_str = "0.3.5"
+urlencoding = "2.1.3"

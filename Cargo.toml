@@ -1,3 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["turnip_api", "turnip_server"]
+members = ["turnip_api", "turnip_api_search", "turnip_server"]
