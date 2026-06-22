@@ -2,8 +2,26 @@ mod config;
 mod conversions;
 mod placeholder_url;
 
-/// Returns a single URL
-async fn query_to_redirect(query: &str) -> String {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Auth;
 
-/// Returns a list of (name, URL) named links to use as suggestions
-async fn query_suggestions(query: &str) -> Vec<(String, String)> {}
+pub struct Ctx {}
+impl Ctx {
+    /// Redirect to an actual search engine with a search term
+    /// TODO: if it's an outcome of a suggestion, send it somewhere else?
+    pub async fn search(
+        &self,
+        req: turnip_api::AuthedRequest<'_, Auth>,
+    ) -> Result<turnip_api::ApiResponse, turnip_api::ApiError> {
+        todo!()
+    }
+
+    /// Returns a list of words to use as suggestions.
+    /// Should be formatted as JSON [original_query, [*suggestions]]
+    pub async fn suggest(
+        &self,
+        req: turnip_api::AuthedRequest<'_, Auth>,
+    ) -> Result<turnip_api::ApiResponse, turnip_api::ApiError> {
+        todo!()
+    }
+}

@@ -1,12 +1,7 @@
 [package]
-name = "turnip_api_search"
+name = "turnip_api_weather"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-
 [dependencies]
-jiff = "0.2.18"
-smol_str = "0.3.5"
 turnip_api = { version = "0.1.0", path = "../turnip_api" }
-urlencoding = "2.1.3"

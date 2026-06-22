@@ -4,13 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-geojson = "0.24.1"
-http = "1.2.0"
-jsonwebtoken = "9.3.1"
-rand_chacha = { version = "0.9.0", features = ["os_rng", "std"] }
-rustc-hash = "2.1.1"
-serde = "1.0.218"
-serde_json = "1.0.139"
+http-body-util = "0.1.3"
+hyper = "1"
+log = "0.4.33"
+serde = "1.0.228"
+serde_json = "1.0.150"
 
 [dev-dependencies]
 serial_test = "3.2.0"
