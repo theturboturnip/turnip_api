@@ -19,6 +19,7 @@ pub struct BasicExternalApi {
     path_start: String, // = "/"
     basic_headers: Vec<(String, String)>,
     rate: RateLimiter,
+    client: reqwest::Client,
 }
 impl BasicExternalApi {
     pub fn new() {}
@@ -29,7 +30,7 @@ impl BasicExternalApi {
         query: &[(&str, &str)],
         frag: Option<&str>,
         headers: &[(&str, &str)],
-    ) -> Result<(Uri, String, Request<Empty<Bytes>>), AnyError> {
+    ) -> Result<(Uri, reqwest::Request), AnyError> {
         let path_and_query_str = {
             let mut p_q = self.path_start.clone();
             p_q.push_str(path);
@@ -60,16 +61,9 @@ impl BasicExternalApi {
             .path_and_query(path_and_query_str)
             .build()?;
 
-        let host = &self.domain;
-        let port = url.port_u16().unwrap_or(80);
-        let addr = format!("{}:{}", host, port);
-        let authority = &addr; // url.authority().unwrap().clone();
-
         // Create the request upfront as well as the url
         let req = {
-            let mut b = hyper::Request::builder()
-                .uri(url.clone())
-                .header(hyper::header::HOST, authority.as_str());
+            let mut b = self.client.get(url.to_string());
 
             for (k, v) in self.basic_headers.iter() {
                 b = b.header(k, v);
@@ -79,38 +73,23 @@ impl BasicExternalApi {
                 b = b.header(*k, *v);
             }
 
-            b.body(Empty::<Bytes>::new())?
+            b.body("").build()?
         };
 
-        Ok((url, addr, req))
+        Ok((url, req))
     }
 
     async fn internal_get_request(
         &self,
-        url: Uri,
-        addr: String,
-        req: Request<Empty<Bytes>>,
+        req: reqwest::Request,
     ) -> Result<turnip_api::ExtApiResponse, AnyError> {
         // We've done as much work as we can up front, now wait for permission
         self.rate.acquire().await;
 
-        let stream = TcpStream::connect(addr).await?;
-        let io = TokioIo::new(stream);
-
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await?;
-        {
-            tokio::task::spawn(async move {
-                if let Err(err) = conn.await {
-                    log::error!("Connection to '{}' failed: {:?}", url, err);
-                }
-            });
-        }
-
-        let res = sender.send_request(req).await?;
-
-        // asynchronously aggregate the chunks of the body
+        let res = self.client.execute(req).await?;
         let status = res.status();
-        let body = res.collect().await?.to_bytes();
+        let body = res.bytes().await?;
+        // println!("got response {} {}", status, String::from_utf8_lossy(&body));
 
         Ok(turnip_api::ExtApiResponse::new(status, body))
     }
@@ -132,7 +111,7 @@ impl turnip_api::ExternalApi for BasicExternalApi {
         >,
     > {
         // Do this up front so that the lifetime of the arguments can expire
-        let (url, addr, req) = match self
+        let (url, req) = match self
             .prepare_get_request(path, query, hash, headers)
             .map_err(consume_as_external_err!("error constructing get request"))
         {
@@ -140,8 +119,10 @@ impl turnip_api::ExternalApi for BasicExternalApi {
             Err(e) => return Box::pin(async move { Err(e) }),
         };
 
+        dbg!(&req);
+
         Box::pin(async move {
-            self.internal_get_request(url.clone(), addr, req)
+            self.internal_get_request(req)
                 .await
                 .map_err(consume_as_external_err!(
                     "error evaluating get request for {}",
@@ -183,6 +164,7 @@ pub fn wikipedia_api() -> BasicExternalApi {
             // more to come...?
         ],
         rate: RateLimiter::new(3), // Wikimedia limits at 200/min ~= 3/second
+        client: reqwest::Client::new(),
     }
 }
 
@@ -204,6 +186,7 @@ pub fn tmdb_api(access_token: String) -> BasicExternalApi {
             // more to come...?
         ],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        client: reqwest::Client::new(),
     }
 }
 
@@ -220,5 +203,6 @@ pub fn youtube_api(api_key: String) -> BasicExternalApi {
             // more to come...?
         ],
         rate: RateLimiter::new(100), // One hundred requests/second
+        client: reqwest::Client::new(),
     }
 }
