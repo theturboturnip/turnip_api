@@ -73,9 +73,9 @@ impl ApiResponse {
             })?;
         Ok(ApiResponse(resp))
     }
-    pub fn r300_redirect(to: &str) -> Result<Self, ApiError> {
+    pub fn r302_redirect(to: &str) -> Result<Self, ApiError> {
         let resp = hyper::Response::builder()
-            .status(300)
+            .status(302)
             .header(hyper::header::LOCATION, to)
             .body(http_body_util::Full::new(Bytes::new()))
             .map_err(|e| {

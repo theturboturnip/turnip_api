@@ -27,7 +27,7 @@ impl<'a> Ctx<'a> {
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
         println!("Search Query {}", query);
         let redirect_to = self.search_url.to_string(query.as_ref());
-        turnip_api::ApiResponse::r300_redirect(dbg!(&redirect_to))
+        turnip_api::ApiResponse::r302_redirect(dbg!(&redirect_to))
     }
 
     /// Returns a list of words to use as suggestions.
