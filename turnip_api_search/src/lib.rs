@@ -1,3 +1,5 @@
+use std::num;
+
 use futures::{StreamExt, stream::FuturesOrdered};
 use turnip_api::{ExtApiResponse, ExternalApi, log_external_err, swallow_as_external_err};
 
@@ -107,6 +109,15 @@ impl<'a> Ctx<'a> {
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
         // println!("Suggest Query {}", query);
 
+        let num_items_per_provider: usize = req
+            .get_authed(Auth)?
+            .query_param("n")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(3);
+        if num_items_per_provider > 10 {
+            return Err(turnip_api::ApiError::QueryMalformed);
+        }
+
         let mut external_futures = FuturesOrdered::new();
         let mut external_future_tags = vec![];
         if let Some(wikipedia) = self.wikipedia_api {
@@ -122,7 +133,7 @@ impl<'a> Ctx<'a> {
                 &[
                     ("action", "opensearch"),
                     ("search", query.as_ref()),
-                    ("limit", "2"),
+                    ("limit", &format!("{}", num_items_per_provider)),
                     ("namespace", "0"),
                     ("format", "json"),
                     // ("profile", "fuzzy-subphrases"),
@@ -232,7 +243,7 @@ impl<'a> Ctx<'a> {
                                 .and_then(|results| {
                                     results
                                         .into_iter()
-                                        .take(2)
+                                        .take(num_items_per_provider)
                                         .map(|val| {
                                             val.get("title")
                                                 .or_else(|| val.get("name"))
