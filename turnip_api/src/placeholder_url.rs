@@ -1,7 +1,5 @@
 use std::fmt::Display;
 
-use percent_encoding::NON_ALPHANUMERIC;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaceholderEncoding {
     Plain,

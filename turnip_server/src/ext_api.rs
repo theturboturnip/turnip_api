@@ -36,11 +36,17 @@ impl BasicExternalApi {
             if !query.is_empty() {
                 p_q.push('?');
             }
+            let mut first = true;
             for (k, v) in query {
+                if !first {
+                    p_q.push('&');
+                }
                 p_q.push_str(k);
                 p_q.push('=');
-                p_q.push_str(&urlencoding::encode(v));
-                // TODO url encoding?
+                for s in form_urlencoded::byte_serialize(v.as_bytes()) {
+                    p_q.push_str(s);
+                }
+                first = false;
             }
             if let Some(frag) = frag {
                 p_q.push('#');
