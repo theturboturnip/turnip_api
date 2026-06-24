@@ -60,20 +60,40 @@ impl<'a> Ctx<'a> {
                     ("limit", "2"),
                     ("namespace", "0"),
                     ("format", "json"),
-                    ("profile", "fuzzy-subphrases"),
+                    // ("profile", "fuzzy-subphrases"),
                 ],
                 None,
                 &[],
             ));
+
+            // Alternate approach I have seen in https://github.com/goldsmith/Wikipedia
+            // external_futures.push_back(wikipedia.make_get_request(
+            //     "/w/api.php",
+            //     &[
+            //         ("action", "query"),
+            //         ("list", "search"),
+            //         ("srprop", ""),
+            //         ("srsearch", query.as_ref()),
+            //         ("srinfo", "suggestion"),
+            //         ("srlimit", "2"),
+            //         // ("limit", "2"),
+            //         // ("namespace", "0"),
+            //         ("format", "json"),
+            //         // ("profile", "fuzzy-subphrases"),
+            //     ],
+            //     None,
+            //     &[],
+            // ));
+
             external_future_tags.push('w');
         }
 
         if let Some(tmdb) = self.tmdb_api {
             external_futures.push_back(tmdb.make_get_request(
-                "/3/search/movie",
+                "/3/search/multi",
                 &[("query", query.as_ref())],
                 None,
-                &[],
+                &[("accept", "application/json")],
             ));
             external_future_tags.push('t');
         }
@@ -132,15 +152,32 @@ impl<'a> Ctx<'a> {
                                     results
                                         .into_iter()
                                         .take(2)
-                                        .map(|val| val.get("title").and_then(|t| t.as_str()))
+                                        .map(|val| {
+                                            val.get("title")
+                                                .or_else(|| val.get("name"))
+                                                .and_then(|t| t.as_str())
+                                                .map(|t| {
+                                                    (
+                                                        val.get("media_type")
+                                                            .and_then(|ty| ty.as_str())
+                                                            .unwrap_or("?"),
+                                                        t,
+                                                    )
+                                                })
+                                        })
                                         .collect::<Option<Vec<_>>>()
                                 })
                                 .map_or_else(
                                     log_external_err!("TMDB JSON had bad format"),
                                     |top_titles| {
-                                        suggestions.extend(top_titles.into_iter().map(|title| {
-                                            serde_json::Value::String(format!("tmdb: {}", title))
-                                        }));
+                                        suggestions.extend(top_titles.into_iter().map(
+                                            |(media_type, title)| {
+                                                serde_json::Value::String(format!(
+                                                    "tmdb-{}: {}",
+                                                    media_type, title
+                                                ))
+                                            },
+                                        ));
                                     },
                                 );
                         },
