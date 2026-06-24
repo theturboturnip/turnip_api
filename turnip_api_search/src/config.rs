@@ -1,5 +1,3 @@
-use crate::placeholder_url::PlaceholderUrl;
-
 pub struct QueryConfig<'a> {
     convert_timezone: bool,
     convert_currency: bool,

@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use percent_encoding::NON_ALPHANUMERIC;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaceholderEncoding {
     Plain,
@@ -40,7 +42,11 @@ impl<'a, 'p> Display for PlaceholderPendingUrl<'a, 'p> {
         write!(f, "{}", self.prefix)?;
         match self.placeholder_encoding {
             PlaceholderEncoding::Plain => write!(f, "{}", self.placeholder)?,
-            PlaceholderEncoding::Url => write!(f, "{}", urlencoding::encode(self.placeholder))?,
+            PlaceholderEncoding::Url => {
+                for s in form_urlencoded::byte_serialize(self.placeholder.as_bytes()) {
+                    write!(f, "{}", s)?
+                }
+            }
         };
         write!(f, "{}", self.suffix)
     }

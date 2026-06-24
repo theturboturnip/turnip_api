@@ -7,9 +7,18 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request};
 use hyper_util::rt::tokio::TokioIo;
+use lazy_static;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
-use turnip_api::{ApiError, ApiRequest, ApiResponse, AuthedRequest};
+use turnip_api::placeholder_url::PlaceholderUrl;
+use turnip_api::{ApiError, ApiRequest, ApiResponse, AuthedRequest, ExternalApi};
+
+mod ext_api;
+mod util;
+
+use util::AnyError;
+
+use crate::ext_api::BasicExternalApi;
 
 #[derive(Clone)]
 // An Executor that uses the tokio runtime.
@@ -29,15 +38,17 @@ where
     }
 }
 
-pub struct ServerCtx {
+pub struct ServerCtx<'a> {
     // keys: FnvHashMap<String, Auth>,
     ctx_weather: Option<turnip_api_weather::Ctx>,
     ctx_looper: Option<turnip_api_looper::Ctx>,
-    ctx_search: Option<turnip_api_search::Ctx>,
+    ctx_search: Option<turnip_api_search::Ctx<'a>>,
 }
-impl ServerCtx {
+// ServerCtx is inited at start-of-day, so can be sync
+unsafe impl<'a> Sync for ServerCtx<'a> {}
+impl<'a> ServerCtx<'a> {
     /// The search function doesn't require auth
-    pub fn auth_search<'a>(
+    pub fn auth_search(
         &self,
         req: &'a Request<hyper::body::Incoming>,
     ) -> Result<AuthedRequest<'a, turnip_api_search::Auth>, ApiError> {
@@ -46,10 +57,7 @@ impl ServerCtx {
     }
 }
 
-async fn api_route(
-    ctx: &ServerCtx,
-    req: Request<hyper::body::Incoming>,
-) -> Result<ApiResponse, ApiError> {
+async fn api_route(req: Request<hyper::body::Incoming>) -> Result<ApiResponse, ApiError> {
     match (req.method(), req.uri().path()) {
         // (&Method::GET, "/looper/search") => ctx.ctx_looper.search(ctx.auth_for_looper(req)),
         // (&Method::GET, "/looper/playlistItems") => ctx.ctx_looper.playlist_items(ctx.auth_for_looper(req)),
@@ -73,13 +81,14 @@ async fn api_route(
 }
 
 async fn handle(
-    ctx: &ServerCtx,
     req: Request<hyper::body::Incoming>,
-) -> Result<hyper::Response<http_body_util::Full<Bytes>>, Box<dyn std::error::Error + Send + Sync>>
-{
-    let response = api_route(ctx, req).await;
+) -> Result<hyper::Response<http_body_util::Full<Bytes>>, AnyError> {
+    let response = api_route(req).await;
     match response {
-        Ok(resp) => Ok(resp.0),
+        Ok(resp) => {
+            println!("responding with {:?}", resp.0);
+            Ok(resp.0)
+        }
         Err(e) => {
             let code = match e {
                 ApiError::NoSuchApp => 404,
@@ -87,6 +96,7 @@ async fn handle(
                 ApiError::QueryMalformed => 422,
                 ApiError::QueryTooLong => 414,
                 ApiError::InternalError => 500,
+                ApiError::ExternalApiError => 500,
             };
             let msg = format!("{}: {:?}", code, e);
             let resp = hyper::Response::builder()
@@ -98,15 +108,30 @@ async fn handle(
         }
     }
 }
+lazy_static::lazy_static! {
+    static ref WIKIPEDIA_API: BasicExternalApi = ext_api::wikipedia_api();
+    static ref TMDB_API: Option<BasicExternalApi> = option_env!("TMDB_KEY").map(|key| ext_api::tmdb_api(key.to_owned()));
+    static ref TMDB_API_GENERIC: Option<&'static dyn ExternalApi> = TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi);
 
-const CTX: ServerCtx = ServerCtx {
-    ctx_weather: None,
-    ctx_looper: None,
-    ctx_search: None, // TODO
-};
+    // TODO kagi autosuggest API?         // https://kagi.com/api/autosuggest?q=%s
+    // probably needs cookie/auth
+    // TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=wt-wt&q=
+    // but handles things differently to Kagi!
+
+    static ref ctx: ServerCtx<'static> = ServerCtx {
+        ctx_weather: None,
+        ctx_looper: None, // TODO
+        ctx_search: Some(turnip_api_search::Ctx {
+            search_url: PlaceholderUrl { prefix: "https://kagi.com/search?q=", placeholder_encoding: turnip_api::placeholder_url::PlaceholderEncoding::Url, suffix: "" },
+            generic_suggest_api: None,
+            wikipedia_api: Some(&(*WIKIPEDIA_API)),
+            tmdb_api: *TMDB_API_GENERIC,
+        }),
+    };
+}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), AnyError> {
     pretty_env_logger::init();
 
     // This address is localhost
@@ -134,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // to finish
         tokio::task::spawn(async move {
             if let Err(err) = http1::Builder::new()
-                .serve_connection(io, service_fn(move |req| handle(&CTX, req)))
+                .serve_connection(io, service_fn(move |req| handle(req)))
                 .await
             {
                 log::error!("Error serving connection: {}", err);

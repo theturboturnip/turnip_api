@@ -7,7 +7,9 @@
 //     Search,
 // }
 
-use hyper::body::Bytes;
+use std::{borrow::Cow, pin::Pin};
+
+use hyper::{body::Bytes, StatusCode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiError {
@@ -16,6 +18,7 @@ pub enum ApiError {
     QueryMalformed,
     QueryTooLong,
     InternalError,
+    ExternalApiError,
 }
 
 /// A bare-minimum struct holding everything a turnip_api needs as sanitized input.
@@ -28,21 +31,14 @@ pub enum ApiError {
 ///         - e.g. "key=value1&key=value2" will always return .query_param("key") == Some("value2")
 pub struct ApiRequest<'a> {
     path: &'a str,
-    query: Vec<(&'a str, &'a str)>,
+    query: Vec<(Cow<'a, str>, Cow<'a, str>)>,
 }
 impl<'a> ApiRequest<'a> {
     pub fn new(req: &'a hyper::Request<hyper::body::Incoming>) -> Result<Self, ApiError> {
         let path = req.uri().path();
         let query = match req.uri().query() {
             Some(q) if q.len() > 1024 => Err(ApiError::QueryTooLong)?,
-            Some(q) => q
-                .split("&")
-                .map(|pair| match pair.split_once("=") {
-                    None => Err(ApiError::QueryMalformed),
-                    Some((k, v)) if v.contains("=") => Err(ApiError::QueryMalformed),
-                    Some((k, v)) => Ok((k, v)),
-                })
-                .collect::<Result<Vec<(&str, &str)>, ApiError>>()?,
+            Some(q) => form_urlencoded::parse(q.as_bytes()).collect(),
             None => vec![],
         };
         Ok(Self { path, query })
@@ -50,10 +46,10 @@ impl<'a> ApiRequest<'a> {
     pub fn path(&self) -> &str {
         self.path
     }
-    pub fn query_param(&self, s: &str) -> Option<&str> {
+    pub fn query_param(&self, s: &str) -> Option<Cow<str>> {
         for (k, v) in self.query.iter().rev() {
             if *k == s {
-                return Some(v);
+                return Some(v.clone());
             }
         }
         None
@@ -103,3 +99,57 @@ impl<'a, TAuth: PartialEq> AuthedRequest<'a, TAuth> {
         }
     }
 }
+
+pub trait ExternalApi: Sync {
+    fn make_get_request<'s, 'args>(
+        &'s self,
+        path: &'args str,
+        query: &'args [(&'args str, &'args str)],
+        hash: Option<&'args str>,
+        headers: &'args [(&'args str, &'args str)],
+    ) -> Pin<Box<dyn core::future::Future<Output = Result<ExtApiResponse, ApiError>> + Send + 's>>;
+}
+pub struct ExtApiResponse(StatusCode, Bytes);
+impl ExtApiResponse {
+    pub fn new(s: StatusCode, b: Bytes) -> Self {
+        Self(s, b)
+    }
+    pub fn status(&self) -> StatusCode {
+        self.0
+    }
+    pub fn body(&self) -> &Bytes {
+        &self.1
+    }
+}
+
+#[macro_export]
+macro_rules! consume_as_external_err {
+    ($($arg:tt)*) => {
+        |e| {
+            log::error!("ExternalApiError: {} {}", e, format!($($arg)*));
+            turnip_api::ApiError::ExternalApiError
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! swallow_as_external_err {
+    ($($arg:tt)*) => {
+        |e| {
+            log::error!("Swallow ExternalApiError: {} {}", e, format!($($arg)*));
+            ()
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_external_err {
+    ($($arg:tt)*) => {
+        || {
+            log::error!("Bad External API: {}",  format!($($arg)*));
+            ()
+        }
+    };
+}
+
+pub mod placeholder_url;
