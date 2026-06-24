@@ -109,6 +109,8 @@ async fn handle(
     }
 }
 lazy_static::lazy_static! {
+    static ref GOOGLE_SUGG_API: BasicExternalApi = ext_api::google_sugg_api();
+    static ref KAGI_SUGG_API: BasicExternalApi = ext_api::kagi_sugg_api();
     static ref WIKIPEDIA_API: BasicExternalApi = ext_api::wikipedia_api();
     static ref TMDB_API: Option<BasicExternalApi> = option_env!("TMDB_KEY").map(|key| ext_api::tmdb_api(key.to_owned()));
     static ref TMDB_API_GENERIC: Option<&'static dyn ExternalApi> = TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi);
@@ -123,7 +125,9 @@ lazy_static::lazy_static! {
         ctx_looper: None, // TODO
         ctx_search: Some(turnip_api_search::Ctx {
             search_url: PlaceholderUrl { prefix: "https://kagi.com/search?q=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
-            generic_suggest_api: None,
+
+            // generic_suggest_api: Some(turnip_api_search::SearchSuggestApi::Google(&*GOOGLE_SUGG_API)),
+            generic_suggest_api: Some(turnip_api_search::SearchSuggestApi::Kagi(&*KAGI_SUGG_API)),
 
             wikipedia_search_url: PlaceholderUrl { prefix: "https://en.wikipedia.org/w/index.php?search=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
             wikipedia_api: Some(&(*WIKIPEDIA_API)),

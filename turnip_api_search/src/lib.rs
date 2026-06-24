@@ -54,9 +54,16 @@ impl<'a> SuggestionSrc<'a> {
     }
 }
 
+pub enum SearchSuggestApi<'a> {
+    Google(&'a dyn ExternalApi),
+    Kagi(&'a dyn ExternalApi),
+    // DDG(&'a dyn ExternalApi), ?
+}
+
 pub struct Ctx<'a> {
     pub search_url: PlaceholderUrl<'a>,
-    pub generic_suggest_api: Option<&'a dyn ExternalApi>,
+
+    pub generic_suggest_api: Option<SearchSuggestApi<'a>>,
 
     pub wikipedia_search_url: PlaceholderUrl<'a>,
     pub wikipedia_api: Option<&'a dyn ExternalApi>,
@@ -156,14 +163,28 @@ impl<'a> Ctx<'a> {
             external_future_tags.push('t');
         }
 
-        if let Some(sugg) = self.generic_suggest_api {
-            external_futures.push_back(sugg.make_get_request(
-                "",
-                &[("q", query.as_ref())],
-                None,
-                &[],
-            ));
-            external_future_tags.push('k');
+        match self.generic_suggest_api {
+            Some(SearchSuggestApi::Google(sugg)) => {
+                external_futures.push_back(sugg.make_get_request(
+                    "",
+                    &[("client", "firefox"), ("q", query.as_ref())],
+                    None,
+                    &[],
+                ));
+                // firefox-style suggestion format
+                external_future_tags.push('k');
+            }
+            Some(SearchSuggestApi::Kagi(sugg)) => {
+                external_futures.push_back(sugg.make_get_request(
+                    "",
+                    &[("q", query.as_ref())],
+                    None,
+                    &[],
+                ));
+                // firefox-style suggestion format
+                external_future_tags.push('k');
+            }
+            None => todo!(),
         }
 
         let external_results: Vec<Result<ExtApiResponse, _>> = external_futures.collect().await;

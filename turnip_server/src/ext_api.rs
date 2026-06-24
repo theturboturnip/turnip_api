@@ -182,6 +182,36 @@ pub fn tmdb_api(access_token: String) -> BasicExternalApi {
     }
 }
 
+pub fn google_sugg_api() -> BasicExternalApi {
+    // http://suggestqueries.google.com/complete/search?output=firefox&q=BLAH
+    BasicExternalApi {
+        scheme: Scheme::HTTPS,
+        domain: Authority::from_static("suggestqueries.google.com"),
+        path_start: "/complete/search".to_owned(),
+        basic_headers: vec![
+            ("User-Agent".to_owned(), user_agent()),
+            // more to come...?
+        ],
+        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        client: reqwest::Client::new(),
+    }
+}
+
+pub fn kagi_sugg_api() -> BasicExternalApi {
+    // https://kagisuggest.com/api/autosuggest?q=%s
+    BasicExternalApi {
+        scheme: Scheme::HTTPS,
+        domain: Authority::from_static("kagisuggest.com"),
+        path_start: "/api/autosuggest".to_owned(),
+        basic_headers: vec![
+            ("User-Agent".to_owned(), user_agent()),
+            // more to come...?
+        ],
+        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        client: reqwest::Client::new(),
+    }
+}
+
 /// Maybe this works, maybe it doesn't. it's a basic example.
 pub fn youtube_api(api_key: String) -> BasicExternalApi {
     BasicExternalApi {
