@@ -111,7 +111,7 @@ impl turnip_api::ExternalApi for BasicExternalApi {
             Err(e) => return Box::pin(async move { Err(e) }),
         };
 
-        dbg!(&req);
+        // dbg!(&req);
 
         Box::pin(async move {
             self.internal_get_request(req)

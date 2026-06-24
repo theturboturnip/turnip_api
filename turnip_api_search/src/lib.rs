@@ -8,10 +8,60 @@ mod conversions;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Auth;
 
+const SUGG_SHORTCUT_PREFIX: &'static str = "~\u{200D}"; // 00A0 for NBSP, 200D for zero width joiner
+enum SuggestionSrc<'a> {
+    Wikipedia,
+    Tmdb { media_type: &'a str },
+}
+impl<'a> SuggestionSrc<'a> {
+    fn tag(&self, sugg: &str) -> serde_json::Value {
+        let s = match self {
+            SuggestionSrc::Wikipedia => format!("{}wiki: {}", SUGG_SHORTCUT_PREFIX, sugg),
+            SuggestionSrc::Tmdb { media_type } if *media_type == "movie" => {
+                format!("{}movie: {}", SUGG_SHORTCUT_PREFIX, sugg)
+            }
+            SuggestionSrc::Tmdb { media_type } if *media_type == "tv" => {
+                format!("{}tv: {}", SUGG_SHORTCUT_PREFIX, sugg)
+            }
+            SuggestionSrc::Tmdb { media_type } => {
+                format!("{}tmdb-{}: {}", SUGG_SHORTCUT_PREFIX, media_type, sugg)
+            }
+        };
+        serde_json::Value::String(s)
+    }
+    fn try_untag(query: &'a str) -> Result<(SuggestionSrc<'a>, &'a str), &'a str> {
+        let sugg = query
+            .strip_prefix(SUGG_SHORTCUT_PREFIX)
+            .and_then(|s| s.split_once(": "))
+            .and_then(|(prefix, sugg)| {
+                let src = if prefix == "wiki" {
+                    SuggestionSrc::Wikipedia
+                } else if prefix == "movie" {
+                    SuggestionSrc::Tmdb { media_type: prefix }
+                } else if prefix == "tv" {
+                    SuggestionSrc::Tmdb { media_type: prefix }
+                } else if let Some(tmdb_postfix) = prefix.strip_prefix("tmdb-") {
+                    SuggestionSrc::Tmdb {
+                        media_type: tmdb_postfix,
+                    }
+                } else {
+                    return None;
+                };
+
+                Some((src, sugg))
+            });
+        sugg.ok_or(query)
+    }
+}
+
 pub struct Ctx<'a> {
     pub search_url: PlaceholderUrl<'a>,
     pub generic_suggest_api: Option<&'a dyn ExternalApi>,
+
+    pub wikipedia_search_url: PlaceholderUrl<'a>,
     pub wikipedia_api: Option<&'a dyn ExternalApi>,
+
+    pub tmdb_search_url: PlaceholderUrl<'a>,
     pub tmdb_api: Option<&'a dyn ExternalApi>,
 }
 impl<'a> Ctx<'a> {
@@ -25,9 +75,17 @@ impl<'a> Ctx<'a> {
             .get_authed(Auth)?
             .query_param("q")
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
-        println!("Search Query {}", query);
-        let redirect_to = self.search_url.to_string(query.as_ref());
-        turnip_api::ApiResponse::r302_redirect(dbg!(&redirect_to))
+        // println!("Search Query {}", query);
+
+        let redirect_to = if let Ok((src, sugg)) = SuggestionSrc::try_untag(&query) {
+            match src {
+                SuggestionSrc::Wikipedia => self.wikipedia_search_url.to_string(sugg.as_ref()),
+                SuggestionSrc::Tmdb { media_type } => self.tmdb_search_url.to_string(sugg.as_ref()),
+            }
+        } else {
+            self.search_url.to_string(query.as_ref())
+        };
+        turnip_api::ApiResponse::r302_redirect(&redirect_to)
     }
 
     /// Returns a list of words to use as suggestions.
@@ -40,7 +98,7 @@ impl<'a> Ctx<'a> {
             .get_authed(Auth)?
             .query_param("q")
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
-        println!("Suggest Query {}", query);
+        // println!("Suggest Query {}", query);
 
         let mut external_futures = FuturesOrdered::new();
         let mut external_future_tags = vec![];
@@ -133,9 +191,11 @@ impl<'a> Ctx<'a> {
                                 .map_or_else(
                                     log_external_err!("Wikipedia JSON had bad format"),
                                     |suggs| {
-                                        suggestions.extend(suggs.into_iter().map(|s| {
-                                            serde_json::Value::String(format!("wiki: {}", s))
-                                        }));
+                                        suggestions.extend(
+                                            suggs
+                                                .into_iter()
+                                                .map(|sugg| SuggestionSrc::Wikipedia.tag(sugg)),
+                                        );
                                     },
                                 );
                         },
@@ -172,10 +232,7 @@ impl<'a> Ctx<'a> {
                                     |top_titles| {
                                         suggestions.extend(top_titles.into_iter().map(
                                             |(media_type, title)| {
-                                                serde_json::Value::String(format!(
-                                                    "tmdb-{}: {}",
-                                                    media_type, title
-                                                ))
+                                                SuggestionSrc::Tmdb { media_type }.tag(title)
                                             },
                                         ));
                                     },

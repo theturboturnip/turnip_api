@@ -10,7 +10,7 @@ use hyper_util::rt::tokio::TokioIo;
 use lazy_static;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
-use turnip_api::placeholder_url::PlaceholderUrl;
+use turnip_api::placeholder_url::{PlaceholderEncoding, PlaceholderUrl};
 use turnip_api::{ApiError, ApiRequest, ApiResponse, AuthedRequest, ExternalApi};
 
 mod ext_api;
@@ -86,7 +86,7 @@ async fn handle(
     let response = api_route(req).await;
     match response {
         Ok(resp) => {
-            println!("responding with {:?}", resp.0);
+            // println!("responding with {:?}", resp.0);
             Ok(resp.0)
         }
         Err(e) => {
@@ -122,9 +122,13 @@ lazy_static::lazy_static! {
         ctx_weather: None,
         ctx_looper: None, // TODO
         ctx_search: Some(turnip_api_search::Ctx {
-            search_url: PlaceholderUrl { prefix: "https://kagi.com/search?q=", placeholder_encoding: turnip_api::placeholder_url::PlaceholderEncoding::Url, suffix: "" },
+            search_url: PlaceholderUrl { prefix: "https://kagi.com/search?q=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
             generic_suggest_api: None,
+
+            wikipedia_search_url: PlaceholderUrl { prefix: "https://en.wikipedia.org/w/index.php?search=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
             wikipedia_api: Some(&(*WIKIPEDIA_API)),
+
+            tmdb_search_url: PlaceholderUrl { prefix: "https://www.themoviedb.org/search?query=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
             tmdb_api: *TMDB_API_GENERIC,
         }),
     };
