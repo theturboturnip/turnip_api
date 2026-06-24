@@ -1,14 +1,8 @@
 use std::pin::Pin;
-use std::str::FromStr;
 
 use async_rate_limiter::RateLimiter;
 use http::uri::{Authority, Scheme};
-use http_body_util::{BodyExt, Empty};
-use hyper::{body::Buf, Request};
-use hyper::{body::Bytes, Uri};
-use hyper_util::rt::TokioIo;
-use serde::Deserialize;
-use tokio::net::TcpStream;
+use hyper::Uri;
 use turnip_api::consume_as_external_err;
 
 use crate::util::AnyError;
@@ -22,8 +16,6 @@ pub struct BasicExternalApi {
     client: reqwest::Client,
 }
 impl BasicExternalApi {
-    pub fn new() {}
-
     fn prepare_get_request(
         &self,
         path: &str,
