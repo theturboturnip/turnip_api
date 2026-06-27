@@ -1,11 +1,9 @@
-use std::num;
-
 use futures::{StreamExt, stream::FuturesOrdered};
 use turnip_api::{ExtApiResponse, ExternalApi, log_external_err, swallow_as_external_err};
 
 use turnip_api::placeholder_url::PlaceholderUrl;
 
-mod conversions;
+pub mod conversions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Auth;
@@ -72,6 +70,8 @@ pub struct Ctx<'a> {
 
     pub tmdb_search_url: PlaceholderUrl<'a>,
     pub tmdb_api: Option<&'a dyn ExternalApi>,
+
+    pub convs: conversions::ConversionCtx,
 }
 impl<'a> Ctx<'a> {
     /// Redirect to an actual search engine with a search term
@@ -120,58 +120,73 @@ impl<'a> Ctx<'a> {
 
         let mut external_futures = FuturesOrdered::new();
         let mut external_future_tags = vec![];
-        if let Some(wikipedia) = self.wikipedia_api {
-            // /w/api.php
-            // ?action=opensearch
-            // &search=zyz          # Search query
-            // &limit=1             # Return only the first result
-            // &namespace=0         # Search only articles, ignoring Talk, Mediawiki, etc.
-            // &format=json         # 'jsonfm' prints the JSON in HTML for debugging.
-            // &profile=fuzzy-subphrases # Typo correction
-            external_futures.push_back(wikipedia.make_get_request(
-                "/w/api.php",
-                &[
-                    ("action", "opensearch"),
-                    ("search", query.as_ref()),
-                    ("limit", &format!("{}", num_items_per_provider)),
-                    ("namespace", "0"),
-                    ("format", "json"),
-                    // ("profile", "fuzzy-subphrases"),
-                ],
-                None,
-                &[],
-            ));
 
-            // Alternate approach I have seen in https://github.com/goldsmith/Wikipedia
-            // external_futures.push_back(wikipedia.make_get_request(
-            //     "/w/api.php",
-            //     &[
-            //         ("action", "query"),
-            //         ("list", "search"),
-            //         ("srprop", ""),
-            //         ("srsearch", query.as_ref()),
-            //         ("srinfo", "suggestion"),
-            //         ("srlimit", "2"),
-            //         // ("limit", "2"),
-            //         // ("namespace", "0"),
-            //         ("format", "json"),
-            //         // ("profile", "fuzzy-subphrases"),
-            //     ],
-            //     None,
-            //     &[],
-            // ));
+        // TODO update currencies
+        // TODO figure out where to redirect suggested solutions to
+        let mut suggestions = vec![];
+        if let Some(convs) = self.convs.parse_and_convert(query.as_ref()) {
+            suggestions.extend(convs.into_iter().map(|conv| {
+                serde_json::Value::String(format!(
+                    "{:?} {:?} = {:?} {:?}",
+                    conv.input_val, conv.input_unit, conv.output_val, conv.output_unit
+                ))
+            }));
+        } else {
+            // If it's a conversion, don't bother search
 
-            external_future_tags.push('w');
-        }
+            if let Some(wikipedia) = self.wikipedia_api {
+                // /w/api.php
+                // ?action=opensearch
+                // &search=zyz          # Search query
+                // &limit=1             # Return only the first result
+                // &namespace=0         # Search only articles, ignoring Talk, Mediawiki, etc.
+                // &format=json         # 'jsonfm' prints the JSON in HTML for debugging.
+                // &profile=fuzzy-subphrases # Typo correction
+                external_futures.push_back(wikipedia.make_get_request(
+                    "/w/api.php",
+                    &[
+                        ("action", "opensearch"),
+                        ("search", query.as_ref()),
+                        ("limit", &format!("{}", num_items_per_provider)),
+                        ("namespace", "0"),
+                        ("format", "json"),
+                        // ("profile", "fuzzy-subphrases"),
+                    ],
+                    None,
+                    &[],
+                ));
 
-        if let Some(tmdb) = self.tmdb_api {
-            external_futures.push_back(tmdb.make_get_request(
-                "/3/search/multi",
-                &[("query", query.as_ref())],
-                None,
-                &[("accept", "application/json")],
-            ));
-            external_future_tags.push('t');
+                // Alternate approach I have seen in https://github.com/goldsmith/Wikipedia
+                // external_futures.push_back(wikipedia.make_get_request(
+                //     "/w/api.php",
+                //     &[
+                //         ("action", "query"),
+                //         ("list", "search"),
+                //         ("srprop", ""),
+                //         ("srsearch", query.as_ref()),
+                //         ("srinfo", "suggestion"),
+                //         ("srlimit", "2"),
+                //         // ("limit", "2"),
+                //         // ("namespace", "0"),
+                //         ("format", "json"),
+                //         // ("profile", "fuzzy-subphrases"),
+                //     ],
+                //     None,
+                //     &[],
+                // ));
+
+                external_future_tags.push('w');
+            }
+
+            if let Some(tmdb) = self.tmdb_api {
+                external_futures.push_back(tmdb.make_get_request(
+                    "/3/search/multi",
+                    &[("query", query.as_ref())],
+                    None,
+                    &[("accept", "application/json")],
+                ));
+                external_future_tags.push('t');
+            }
         }
 
         match self.generic_suggest_api {
@@ -199,8 +214,6 @@ impl<'a> Ctx<'a> {
         }
 
         let external_results: Vec<Result<ExtApiResponse, _>> = external_futures.collect().await;
-
-        let mut suggestions = vec![];
 
         for (tag, result) in external_future_tags
             .into_iter()
