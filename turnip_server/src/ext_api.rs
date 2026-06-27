@@ -5,7 +5,7 @@ use http::uri::{Authority, Scheme};
 use hyper::Uri;
 use turnip_api::consume_as_external_err;
 
-use crate::util::AnyError;
+use turnip_api::util::AnyError;
 
 pub struct BasicExternalApi {
     scheme: http::uri::Scheme,

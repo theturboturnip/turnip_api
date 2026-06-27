@@ -11,12 +11,9 @@ use lazy_static;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use turnip_api::placeholder_url::{PlaceholderEncoding, PlaceholderUrl};
-use turnip_api::{ApiError, ApiRequest, ApiResponse, AuthedRequest, ExternalApi};
+use turnip_api::{util::AnyError, ApiError, ApiRequest, ApiResponse, AuthedRequest, ExternalApi};
 
 mod ext_api;
-mod util;
-
-use util::AnyError;
 
 use crate::ext_api::BasicExternalApi;
 
