@@ -67,11 +67,12 @@ async fn api_route(req: Request<hyper::body::Incoming>) -> Result<ApiResponse, A
                 .await
         }
         (&Method::GET, "/search/suggest") => {
-            ctx.ctx_search
-                .as_ref()
-                .ok_or(ApiError::NoSuchApp)?
-                .suggest(ctx.auth_search(&req)?)
-                .await
+            let search = ctx.ctx_search.as_ref().ok_or(ApiError::NoSuchApp)?;
+
+            // Rudimentary debouncing - expect the request to be cancelled if the user types another character
+            // 500ms is too long - this may also be too long, in practice...
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            search.suggest(ctx.auth_search(&req)?).await
         }
         _ => return Err(ApiError::NoSuchApp),
     }
