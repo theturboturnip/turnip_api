@@ -6,3 +6,6 @@ default:
 
 serve:
     cargo run
+
+test:
+    cargo test
