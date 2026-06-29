@@ -8,11 +8,28 @@ pub struct Date {
     m: u8,
     d: u8,
 }
+impl From<(u16, u8, u8)> for Date {
+    fn from(value: (u16, u8, u8)) -> Self {
+        Self {
+            y: value.0,
+            m: value.1,
+            d: value.2,
+        }
+    }
+}
 /// 24-hour time
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Time {
     h: u8,
     m: u8,
+}
+impl From<(u8, u8)> for Time {
+    fn from(value: (u8, u8)) -> Self {
+        Self {
+            h: value.0,
+            m: value.1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
