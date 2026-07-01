@@ -296,6 +296,10 @@ pub struct ConversionCtx {
     num_unit_to_name: FnvHashMap<NumUnit, String>,
 
     currencies_to_usd: FnvHashMap<ArrayString<3>, f64>,
+
+    small_formatter: numfmt::Formatter,
+    large_formatter: numfmt::Formatter,
+    huge_formatter: numfmt::Formatter,
 }
 impl ConversionCtx {
     pub fn new() -> Self {
@@ -408,13 +412,32 @@ impl ConversionCtx {
             num_unit_to_suffix,
             num_unit_to_name,
             currencies_to_usd: FnvHashMap::default(),
+
+            small_formatter: numfmt::Formatter::new()
+                .scales(numfmt::Scales::none())
+                .comma(false)
+                .separator(',')
+                .unwrap()
+                .precision(numfmt::Precision::Significance(4)),
+            large_formatter: numfmt::Formatter::new()
+                .scales(numfmt::Scales::none())
+                .comma(false)
+                .separator(',')
+                .unwrap()
+                .precision(numfmt::Precision::Decimals(0)),
+            huge_formatter: numfmt::Formatter::new()
+                .scales(numfmt::Scales::none())
+                .comma(false)
+                .separator(',')
+                .unwrap()
+                .precision(numfmt::Precision::Significance(4)),
         }
     }
 
     fn attempt_convert(&self, input_unit: NumUnit, val: f64, output_unit: NumUnit) -> Option<f64> {
         use NumUnit::*;
         let o_val = match (input_unit, output_unit) {
-            (Length(i), Length(o)) => dbg!(basic_conv!(i, o, val)),
+            (Length(i), Length(o)) => basic_conv!(i, o, val),
             (Currency(i), Currency(o)) => {
                 let i_to_usd = self.currencies_to_usd.get(&i)?;
                 let o_to_usd = self.currencies_to_usd.get(&o)?;
@@ -458,9 +481,23 @@ impl ConversionCtx {
                         .expect("Ft->In should never fail")
                     ),
                     _ => {
+                        // TODO format with scientific 4sig-figs if <0.001 or >1E10, to 4sig-figs if <10_000, and rounded to integer otherwise
+                        // This is a personal heuristic.
+                        // Currently approximated with numfmt: <10_000 use a formatter with 4sf, which automatically kicks in scientific if <0.0001. (close enough for me).
+                        // >=10_000, <1E11 (numfmt scientific starting point) = 0dp precision
+                        // >= 1E11 = 4sf again.
+
+                        let output_fmt = if output_val < 10_000.0 {
+                            &self.small_formatter
+                        } else if output_val < 1E11 {
+                            &self.large_formatter
+                        } else {
+                            &self.huge_formatter
+                        };
+
                         format!(
                             "{}{}",
-                            output_val,
+                            output_fmt.fmt_string(output_val),
                             self.num_unit_to_suffix.get(&output_unit).or_else(|| {
                                 log::error!("No suffix for unit {:?}", output_unit);
                                 None
@@ -489,8 +526,7 @@ impl ConversionCtx {
     }
 
     pub fn parse_and_convert(&self, query: &str) -> Option<Vec<Conversion>> {
-        dbg!(query);
-        let (input_val, input_unit, output_unit) = dbg!(parser::parse_conversion(query)?);
+        let (input_val, input_unit, output_unit) = parser::parse_conversion(query)?;
 
         let input_unit = &input_unit.to_ascii_lowercase_smolstr();
         let output_unit = &output_unit.to_ascii_lowercase_smolstr();
@@ -499,9 +535,6 @@ impl ConversionCtx {
             Value::Number(input_val) => {
                 let input_units = self.str_to_num_unit.get(input_unit)?;
                 let output_units = self.str_to_num_unit.get(output_unit)?;
-
-                dbg!(input_units);
-                dbg!(output_units);
 
                 Some(
                     input_units

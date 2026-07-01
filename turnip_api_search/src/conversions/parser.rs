@@ -214,6 +214,7 @@ fn parse_pos_num(v: &str) -> IResult<&str, f64> {
         for i in 0..s.len() {
             n *= 10;
         }
+        // TODO handle these errors if exceeds u64
         n + s.parse::<u64>().unwrap()
     });
 
@@ -224,11 +225,12 @@ fn parse_pos_num(v: &str) -> IResult<&str, f64> {
         let (n_decimal, n_max) =
             digit_seq
                 .into_iter()
-                .fold((0, 1), |(mut n_decimal, mut n_max), s: &str| {
+                .fold((0u64, 1u64), |(mut n_decimal, mut n_max), s: &str| {
                     for i in 0..s.len() {
                         n_decimal *= 10;
                         n_max *= 10;
                     }
+                    // TODO handle these errors if exceeds u64
                     (n_decimal + s.parse::<u64>().unwrap(), n_max)
                 });
         let f_decimal = n_decimal as f64;
