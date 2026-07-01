@@ -297,6 +297,7 @@ pub struct ConversionCtx {
 
     currencies_to_usd: FnvHashMap<ArrayString<3>, f64>,
 
+    input_formatter: numfmt::Formatter,
     small_formatter: numfmt::Formatter,
     large_formatter: numfmt::Formatter,
     huge_formatter: numfmt::Formatter,
@@ -413,6 +414,12 @@ impl ConversionCtx {
             num_unit_to_name,
             currencies_to_usd: FnvHashMap::default(),
 
+            input_formatter: numfmt::Formatter::new()
+                .scales(numfmt::Scales::none())
+                .comma(false)
+                .separator(',')
+                .unwrap()
+                .precision(numfmt::Precision::Unspecified),
             small_formatter: numfmt::Formatter::new()
                 .scales(numfmt::Scales::none())
                 .comma(false)
@@ -461,7 +468,7 @@ impl ConversionCtx {
                     _ => {
                         format!(
                             "{}{}",
-                            input_val,
+                            self.input_formatter.fmt_string(input_val),
                             self.num_unit_to_suffix.get(&input_unit).or_else(|| {
                                 log::error!("No suffix for unit {:?}", input_unit);
                                 None
