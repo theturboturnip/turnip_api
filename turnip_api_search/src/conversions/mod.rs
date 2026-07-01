@@ -111,6 +111,9 @@ pub enum LengthUnit {
     M,
     Cm,
     Mm,
+    Um, // aka micrometer aka micron
+    Nm,
+    Pm,
     In,
     Ft,
     /// Stored as feet internally but converted to feet'inches'' for display
@@ -124,8 +127,11 @@ impl NumUnitGroup for LengthUnit {
         match self {
             LengthUnit::Km => (10_000.0, 0.0),
             LengthUnit::M => (1.0, 0.0),
-            LengthUnit::Cm => (0.01, 0.0),
-            LengthUnit::Mm => (0.001, 0.0),
+            LengthUnit::Cm => (1E-2, 0.0),
+            LengthUnit::Mm => (1E-3, 0.0),
+            LengthUnit::Um => (1E-6, 0.0),
+            LengthUnit::Nm => (1E-9, 0.0),
+            LengthUnit::Pm => (1E-12, 0.0),
             LengthUnit::In => (0.0254, 0.0),
             LengthUnit::Ft | LengthUnit::FtIn => (0.3048, 0.0),
             LengthUnit::Mile => (1609.344, 0.0),
@@ -414,6 +420,31 @@ impl ConversionCtx {
                 "millimetres",
                 "mm",
             ],
+        );
+        basic_unit_suffix(
+            Length(Um),
+            "micrometers",
+            "μm",
+            &[
+                "micrometer",
+                "micrometre",
+                "micrometers",
+                "micrometres",
+                "um",
+                "μm",
+            ],
+        );
+        basic_unit_suffix(
+            Length(Nm),
+            "nanometers",
+            "nm",
+            &["nanometer", "nanometre", "nanometers", "nanometres", "nm"],
+        );
+        basic_unit_suffix(
+            Length(Pm),
+            "picometers",
+            "pm",
+            &["picometer", "picometre", "picometers", "picometres", "pm"],
         );
         basic_unit_suffix(
             Length(In),
