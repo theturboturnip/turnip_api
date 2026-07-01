@@ -17,7 +17,7 @@ impl From<(u16, u8, u8)> for Date {
         }
     }
 }
-/// 24-hour time
+/// 24-hour time, not validated - could produce invalid times like 80:80
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Time {
     h: u8,
@@ -39,7 +39,7 @@ pub enum Value {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Unit {
+pub enum NumUnit {
     Length(LengthUnit),
     Currency(ArrayString<3>),
     // ...
@@ -58,6 +58,7 @@ pub enum LengthUnit {
     Mm,
     In,
     Ft,
+    /// Stored as feet internally but converted to feet'inches'' for display
     FtIn,
     Mile,
     NauticalMile,
@@ -79,15 +80,28 @@ impl NumUnitGroup for LengthUnit {
     }
 }
 
-type NumberUnits = ArrayVec<Unit, 15>;
+type NumberUnits = ArrayVec<NumUnit, 15>;
 
 type NumberUnitStr = SmolStr;
 
-pub struct Conversion {
-    pub input_unit: Unit,
-    pub input_val: Value,
-    pub output_unit: Unit,
-    pub output_val: Value,
+enum InternalConversion {
+    Number {
+        input_unit: NumUnit,
+        output_unit: NumUnit,
+        input_val: f64,
+        output_val: f64,
+    },
+    DateTime {
+        input_unit: NumUnit,
+        output_unit: NumUnit,
+        input_val: (Date, Time),
+        output_val: (Date, Time),
+    },
+}
+
+pub enum Conversion {
+    Number(String),
+    DateTime(String),
 }
 
 macro_rules! basic_conv {
@@ -278,36 +292,49 @@ const CURRENCY_PREFIXES: [(char, &str); 3] = [('$', "USD"), ('£', "GBP"), ('€
 
 pub struct ConversionCtx {
     str_to_num_unit: FnvHashMap<NumberUnitStr, NumberUnits>,
-    num_unit_to_suffix: FnvHashMap<Unit, String>,
+    num_unit_to_suffix: FnvHashMap<NumUnit, String>,
+    num_unit_to_name: FnvHashMap<NumUnit, String>,
 
     currencies_to_usd: FnvHashMap<ArrayString<3>, f64>,
 }
 impl ConversionCtx {
     pub fn new() -> Self {
         let mut str_to_num_unit = FnvHashMap::default();
+        let mut num_unit_to_name = FnvHashMap::default();
         let mut num_unit_to_suffix = FnvHashMap::default();
 
         use LengthUnit::*;
-        use Unit::*;
-        let mut basic_unit_suffix = |unit, strs: &[&str], suffix: &str| {
-            for s in strs {
+        use NumUnit::*;
+        let mut basic_unit_suffix = |unit, name: &str, suffix: &str, parsers: &[&str]| {
+            num_unit_to_name
+                .entry(unit)
+                .insert_entry(format!("{}", name));
+            num_unit_to_suffix
+                .entry(unit)
+                .insert_entry(format!("{}", suffix));
+            for s in parsers {
                 str_to_num_unit
                     .entry(NumberUnitStr::from(*s))
                     .or_insert_with(NumberUnits::new)
                     .push(unit);
             }
-            num_unit_to_suffix
-                .entry(unit)
-                .insert_entry(format!("{}", suffix));
         };
         basic_unit_suffix(
             Length(Km),
-            &["kilometer", "kilometre", "kilometers", "kilometres", "km"],
+            "kilometers",
             "km",
+            &["kilometer", "kilometre", "kilometers", "kilometres", "km"],
         );
-        basic_unit_suffix(Length(M), &["meter", "metre", "meters", "metres", "m"], "m");
+        basic_unit_suffix(
+            Length(M),
+            "meters",
+            "m",
+            &["meter", "metre", "meters", "metres", "m"],
+        );
         basic_unit_suffix(
             Length(Cm),
+            "centimeters",
+            "cm",
             &[
                 "centimeter",
                 "centimetre",
@@ -315,10 +342,11 @@ impl ConversionCtx {
                 "centimetres",
                 "cm",
             ],
-            "cm",
         );
         basic_unit_suffix(
             Length(Mm),
+            "millimeters",
+            "mm",
             &[
                 "millimeter",
                 "millimetre",
@@ -326,17 +354,28 @@ impl ConversionCtx {
                 "millimetres",
                 "mm",
             ],
-            "mm",
         );
-        basic_unit_suffix(Length(In), &["inch", "inches", "inchs", "in"], "in");
-        basic_unit_suffix(Length(Ft), &["foot", "feet", "ft"], "ft");
-        basic_unit_suffix(Length(Mile), &["mile", "miles"], "miles");
+        basic_unit_suffix(
+            Length(In),
+            "inches",
+            "in",
+            &["inch", "inches", "inchs", "in"],
+        );
+        basic_unit_suffix(Length(Ft), "feet", "ft", &["foot", "feet", "ft"]);
+        basic_unit_suffix(
+            Length(FtIn),
+            "feet and inches",
+            "ft/in",
+            &["foot", "feet", "ft"],
+        );
+        basic_unit_suffix(Length(Mile), "miles", " miles", &["mile", "miles"]);
         basic_unit_suffix(
             Length(NauticalMile),
-            &["nautical mile", "nautical miles"],
             "nautical miles",
+            " nautical miles",
+            &["nautical mile", "nautical miles"],
         );
-        basic_unit_suffix(Length(Yd), &["yard", "yards", "yd", "yds"], "yards");
+        basic_unit_suffix(Length(Yd), "yds", " yards", &["yard", "yards", "yd", "yds"]);
 
         for (currency_str, _currency_written) in CURRENCIES {
             let unit = Currency(ArrayString::from(currency_str).unwrap());
@@ -347,6 +386,10 @@ impl ConversionCtx {
                 .push(unit);
 
             num_unit_to_suffix
+                .entry(unit)
+                .insert_entry(format!("{}", currency_str));
+
+            num_unit_to_name
                 .entry(unit)
                 .insert_entry(format!("{}", currency_str));
         }
@@ -363,31 +406,85 @@ impl ConversionCtx {
         Self {
             str_to_num_unit,
             num_unit_to_suffix,
-
+            num_unit_to_name,
             currencies_to_usd: FnvHashMap::default(),
         }
     }
 
-    fn attempt_convert(
-        &self,
-        input_unit: Unit,
-        input_val: Value,
-        output_unit: Unit,
-    ) -> Option<f64> {
-        use Unit::*;
-        if let Value::Number(val) = input_val {
-            let o_val = match (input_unit, output_unit) {
-                (Length(i), Length(o)) => dbg!(basic_conv!(i, o, val)),
-                (Currency(i), Currency(o)) => {
-                    let i_to_usd = self.currencies_to_usd.get(&i)?;
-                    let o_to_usd = self.currencies_to_usd.get(&o)?;
-                    val * i_to_usd / o_to_usd
-                }
-                _ => return None,
-            };
-            Some(o_val)
-        } else {
-            None // TODO
+    fn attempt_convert(&self, input_unit: NumUnit, val: f64, output_unit: NumUnit) -> Option<f64> {
+        use NumUnit::*;
+        let o_val = match (input_unit, output_unit) {
+            (Length(i), Length(o)) => dbg!(basic_conv!(i, o, val)),
+            (Currency(i), Currency(o)) => {
+                let i_to_usd = self.currencies_to_usd.get(&i)?;
+                let o_to_usd = self.currencies_to_usd.get(&o)?;
+                val * i_to_usd / o_to_usd
+            }
+            _ => return None,
+        };
+        Some(o_val)
+    }
+
+    fn render_conversion(&self, conv: InternalConversion) -> Option<Conversion> {
+        match conv {
+            InternalConversion::Number {
+                input_unit,
+                output_unit,
+                input_val,
+                output_val,
+            } => {
+                let input_str = match input_unit {
+                    NumUnit::Length(LengthUnit::FtIn) => return None, // TODO accept this as input??
+                    _ => {
+                        format!(
+                            "{}{}",
+                            input_val,
+                            self.num_unit_to_suffix.get(&input_unit).or_else(|| {
+                                log::error!("No suffix for unit {:?}", input_unit);
+                                None
+                            })?
+                        )
+                    }
+                };
+                let output_str = match output_unit {
+                    NumUnit::Length(LengthUnit::FtIn) => format!(
+                        "{:.0}\u{02032}{:.1}\u{02033}",
+                        output_val.floor(),
+                        self.attempt_convert(
+                            NumUnit::Length(LengthUnit::Ft),
+                            output_val.fract(),
+                            NumUnit::Length(LengthUnit::In)
+                        )
+                        .expect("Ft->In should never fail")
+                    ),
+                    _ => {
+                        format!(
+                            "{}{}",
+                            output_val,
+                            self.num_unit_to_suffix.get(&output_unit).or_else(|| {
+                                log::error!("No suffix for unit {:?}", output_unit);
+                                None
+                            })?
+                        )
+                    }
+                };
+
+                Some(Conversion::Number(format!(
+                    "{} in {} = {}",
+                    input_str,
+                    self.num_unit_to_name.get(&output_unit).or_else(|| {
+                        log::error!("No name for unit {:?}", output_unit);
+                        None
+                    })?,
+                    output_str
+                )))
+            }
+            InternalConversion::DateTime {
+                input_unit,
+                output_unit,
+                input_val: (input_date, input_time),
+                output_val: (output_date, output_time),
+            } => return None, // TODO
         }
     }
 
@@ -398,32 +495,38 @@ impl ConversionCtx {
         let input_unit = &input_unit.to_ascii_lowercase_smolstr();
         let output_unit = &output_unit.to_ascii_lowercase_smolstr();
 
-        let input_units = self.str_to_num_unit.get(input_unit)?;
-        let output_units = self.str_to_num_unit.get(output_unit)?;
+        match input_val {
+            Value::Number(input_val) => {
+                let input_units = self.str_to_num_unit.get(input_unit)?;
+                let output_units = self.str_to_num_unit.get(output_unit)?;
 
-        dbg!(input_units);
-        dbg!(output_units);
+                dbg!(input_units);
+                dbg!(output_units);
 
-        Some(
-            input_units
-                .into_iter()
-                .map(|i| {
-                    output_units
-                        .iter()
-                        .filter_map(|o| {
-                            let v = self.attempt_convert(*i, input_val, *o)?;
-                            Some(Conversion {
-                                input_unit: *i,
-                                input_val,
-                                output_unit: *o,
-                                output_val: Value::Number(v),
-                            })
+                Some(
+                    input_units
+                        .into_iter()
+                        .map(|i| {
+                            output_units
+                                .iter()
+                                .filter_map(|o| {
+                                    let v = self.attempt_convert(*i, input_val, *o)?;
+                                    self.render_conversion(InternalConversion::Number {
+                                        input_unit: *i,
+                                        input_val,
+                                        output_unit: *o,
+                                        output_val: v,
+                                    })
+                                })
+                                .collect::<Vec<_>>()
                         })
-                        .collect::<Vec<_>>()
-                })
-                .flatten()
-                .collect::<Vec<_>>(),
-        )
+                        .flatten()
+                        .collect::<Vec<_>>(),
+                )
+            }
+            _ => None,
+        }
+
         // Some(self.attempt_conversions(input_unit, input_val, output_unit))
     }
 }

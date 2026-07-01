@@ -9,48 +9,80 @@ pub mod conversions;
 pub struct Auth;
 
 const SUGG_SHORTCUT_PREFIX: &'static str = "~\u{200D}"; // 00A0 for NBSP, 200D for zero width joiner
-enum SuggestionSrc<'a> {
+enum SuggestionDst<'a> {
+    /// For suggestions pulled from the Wikipedia search API
     Wikipedia,
+    /// For suggestions pulled from the TMDB search API
     Tmdb { media_type: &'a str },
+    /// For numeric calculations e.g. unit and currency conversions via WolframAlpha
+    /// `https://www.wolframalpha.com/input/?i=1GBP+in+EUR`
+    Calc,
+    /// For time-zone conversions
+    Time,
+    /// All else
+    Search,
 }
-impl<'a> SuggestionSrc<'a> {
+impl<'a> SuggestionDst<'a> {
     fn tag(&self, sugg: &str) -> serde_json::Value {
         let s = match self {
-            SuggestionSrc::Wikipedia => format!("{}wiki: {}", SUGG_SHORTCUT_PREFIX, sugg),
-            SuggestionSrc::Tmdb { media_type } if *media_type == "movie" => {
+            SuggestionDst::Wikipedia => format!("{}wiki: {}", SUGG_SHORTCUT_PREFIX, sugg),
+            SuggestionDst::Tmdb { media_type } if *media_type == "movie" => {
                 format!("{}movie: {}", SUGG_SHORTCUT_PREFIX, sugg)
             }
-            SuggestionSrc::Tmdb { media_type } if *media_type == "tv" => {
+            SuggestionDst::Tmdb { media_type } if *media_type == "tv" => {
                 format!("{}tv: {}", SUGG_SHORTCUT_PREFIX, sugg)
             }
-            SuggestionSrc::Tmdb { media_type } => {
+            SuggestionDst::Tmdb { media_type } => {
                 format!("{}tmdb-{}: {}", SUGG_SHORTCUT_PREFIX, media_type, sugg)
             }
+            SuggestionDst::Calc => {
+                format!("{}calc: {}", SUGG_SHORTCUT_PREFIX, sugg)
+            }
+            SuggestionDst::Time => {
+                format!("{}time: {}", SUGG_SHORTCUT_PREFIX, sugg)
+            }
+            SuggestionDst::Search => sugg.to_string(), // no prefixing
         };
         serde_json::Value::String(s)
     }
-    fn try_untag(query: &'a str) -> Result<(SuggestionSrc<'a>, &'a str), &'a str> {
-        let sugg = query
+    fn untag(query: &'a str) -> (SuggestionDst<'a>, &'a str) {
+        let (prefix, sugg) = query
             .strip_prefix(SUGG_SHORTCUT_PREFIX)
             .and_then(|s| s.split_once(": "))
-            .and_then(|(prefix, sugg)| {
-                let src = if prefix == "wiki" {
-                    SuggestionSrc::Wikipedia
-                } else if prefix == "movie" {
-                    SuggestionSrc::Tmdb { media_type: prefix }
-                } else if prefix == "tv" {
-                    SuggestionSrc::Tmdb { media_type: prefix }
-                } else if let Some(tmdb_postfix) = prefix.strip_prefix("tmdb-") {
-                    SuggestionSrc::Tmdb {
-                        media_type: tmdb_postfix,
-                    }
-                } else {
-                    return None;
-                };
+            .unwrap_or(("", query));
 
-                Some((src, sugg))
-            });
-        sugg.ok_or(query)
+        if prefix == "wiki" {
+            (SuggestionDst::Wikipedia, sugg)
+        } else if prefix == "movie" {
+            (SuggestionDst::Tmdb { media_type: prefix }, sugg)
+        } else if prefix == "tv" {
+            (SuggestionDst::Tmdb { media_type: prefix }, sugg)
+        } else if let Some(tmdb_postfix) = prefix.strip_prefix("tmdb-") {
+            (
+                SuggestionDst::Tmdb {
+                    media_type: tmdb_postfix,
+                },
+                sugg,
+            )
+        } else if prefix == "calc" {
+            let sugg = if let Some((calc_request, _calc_result)) = sugg.split_once(" = ") {
+                // Only pass through the request, don't include the result - might confuse it
+                calc_request
+            } else {
+                sugg
+            };
+            (SuggestionDst::Calc, sugg)
+        } else if prefix == "time" {
+            let sugg = if let Some((calc_request, _calc_result)) = sugg.split_once(" = ") {
+                // Only pass through the request, don't include the result - might confuse it
+                calc_request
+            } else {
+                sugg
+            };
+            (SuggestionDst::Time, sugg)
+        } else {
+            (SuggestionDst::Search, sugg)
+        }
     }
 }
 
@@ -62,7 +94,6 @@ pub enum SearchSuggestApi<'a> {
 
 pub struct Ctx<'a> {
     pub search_url: PlaceholderUrl<'a>,
-
     pub generic_suggest_api: Option<SearchSuggestApi<'a>>,
 
     pub wikipedia_search_url: PlaceholderUrl<'a>,
@@ -70,6 +101,8 @@ pub struct Ctx<'a> {
 
     pub tmdb_search_url: PlaceholderUrl<'a>,
     pub tmdb_api: Option<&'a dyn ExternalApi>,
+
+    pub wolfram_search_url: PlaceholderUrl<'a>,
 
     pub convs: conversions::ConversionCtx,
 }
@@ -86,14 +119,16 @@ impl<'a> Ctx<'a> {
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
         // println!("Search Query {}", query);
 
-        let redirect_to = if let Ok((src, sugg)) = SuggestionSrc::try_untag(&query) {
-            match src {
-                SuggestionSrc::Wikipedia => self.wikipedia_search_url.to_string(sugg.as_ref()),
-                SuggestionSrc::Tmdb { media_type } => self.tmdb_search_url.to_string(sugg.as_ref()),
-            }
-        } else {
-            self.search_url.to_string(query.as_ref())
-        };
+        let (sugg_dst, sugg) = SuggestionDst::untag(&query);
+        let redirect_to = match sugg_dst {
+            SuggestionDst::Wikipedia => self.wikipedia_search_url,
+            SuggestionDst::Tmdb { media_type } => self.tmdb_search_url,
+            // Wolfram Alpha is not bad at time zones
+            SuggestionDst::Calc | SuggestionDst::Time => self.wolfram_search_url,
+            SuggestionDst::Search => self.search_url,
+        }
+        .to_string(sugg.as_ref());
+
         turnip_api::ApiResponse::r302_redirect(&redirect_to)
     }
 
@@ -125,11 +160,9 @@ impl<'a> Ctx<'a> {
         // TODO figure out where to redirect suggested solutions to
         let mut suggestions = vec![];
         if let Some(convs) = self.convs.parse_and_convert(query.as_ref()) {
-            suggestions.extend(convs.into_iter().map(|conv| {
-                serde_json::Value::String(format!(
-                    "{:?} {:?} = {:?} {:?}",
-                    conv.input_val, conv.input_unit, conv.output_val, conv.output_unit
-                ))
+            suggestions.extend(convs.into_iter().map(|conv| match conv {
+                conversions::Conversion::Number(txt) => SuggestionDst::Calc.tag(&txt),
+                conversions::Conversion::DateTime(txt) => SuggestionDst::Time.tag(&txt),
             }));
         } else {
             // If it's a conversion, don't bother search
@@ -239,7 +272,7 @@ impl<'a> Ctx<'a> {
                                         suggestions.extend(
                                             suggs
                                                 .into_iter()
-                                                .map(|sugg| SuggestionSrc::Wikipedia.tag(sugg)),
+                                                .map(|sugg| SuggestionDst::Wikipedia.tag(sugg)),
                                         );
                                     },
                                 );
@@ -277,7 +310,7 @@ impl<'a> Ctx<'a> {
                                     |top_titles| {
                                         suggestions.extend(top_titles.into_iter().map(
                                             |(media_type, title)| {
-                                                SuggestionSrc::Tmdb { media_type }.tag(title)
+                                                SuggestionDst::Tmdb { media_type }.tag(title)
                                             },
                                         ));
                                     },
@@ -301,9 +334,7 @@ impl<'a> Ctx<'a> {
                                     log_external_err!("Sugg JSON had bad format"),
                                     |suggs| {
                                         suggestions.extend(
-                                            suggs
-                                                .into_iter()
-                                                .map(|s| serde_json::Value::String(s.to_string())),
+                                            suggs.into_iter().map(|s| SuggestionDst::Search.tag(s)),
                                         );
                                     },
                                 );
@@ -321,7 +352,7 @@ impl<'a> Ctx<'a> {
             }
         }
 
-        suggestions.push(serde_json::Value::String(query.to_string()));
+        suggestions.push(SuggestionDst::Search.tag(&query));
 
         turnip_api::ApiResponse::r200_json(serde_json::Value::Array(vec![
             serde_json::Value::String(query.to_string()),

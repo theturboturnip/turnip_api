@@ -133,6 +133,8 @@ lazy_static::lazy_static! {
             tmdb_search_url: PlaceholderUrl { prefix: "https://www.themoviedb.org/search?query=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
             tmdb_api: *TMDB_API_GENERIC,
 
+            wolfram_search_url: PlaceholderUrl { prefix: "https://www.wolframalpha.com/input/?i=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
+
             convs: turnip_api_search::conversions::ConversionCtx::new(),
         }),
     };
