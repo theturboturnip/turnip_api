@@ -258,6 +258,9 @@ fn test_parse_pos_num() {
     assert_eq_f("5.4321", 5.4321);
     assert_eq_f("1_000_005.4321", 1000005.4321);
 
+    // TODO this will break if the suffix exceeds u64, in general I haven't tested on big numbers
+    // assert_eq_f("1_000_005.4321237846239843297923874293498327498237", 1000005.4321);
+
     // Hex and binary don't work - this is sad,
     assert_eq!(parse_pos_num("0xabCDeF12").unwrap(), ("xabCDeF12", 0.0));
     assert_eq!(parse_pos_num("0b111011").unwrap(), ("b111011", 0.0));
