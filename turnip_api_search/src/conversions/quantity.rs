@@ -5,7 +5,7 @@ use smol_str::SmolStr;
 use crate::conversions::Conversion;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NumUnit {
+enum NumUnit {
     Length(LengthUnit),
     Temp(TempUnit),
     Time(TimeUnit),
@@ -20,7 +20,7 @@ trait NumUnitGroup: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash:
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LengthUnit {
+enum LengthUnit {
     Km,
     M,
     Cm,
@@ -77,7 +77,7 @@ impl NumUnitGroup for LengthUnit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TempUnit {
+enum TempUnit {
     C,
     F,
     K,
@@ -93,7 +93,7 @@ impl NumUnitGroup for TempUnit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TimeUnit {
+enum TimeUnit {
     S,
     Ms,
     Us,
