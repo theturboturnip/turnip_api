@@ -18,7 +18,96 @@ use nom::{
     multi::separated_list1,
 };
 
-use crate::conversions::{Date, Time, Value};
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Date {
+    y: u16,
+    m: u8,
+    d: u8,
+}
+impl From<(u16, u8, u8)> for Date {
+    fn from(value: (u16, u8, u8)) -> Self {
+        Self {
+            y: value.0,
+            m: value.1,
+            d: value.2,
+        }
+    }
+}
+impl From<jiff::civil::Date> for Date {
+    fn from(value: jiff::civil::Date) -> Self {
+        Self {
+            y: value
+                .year()
+                .try_into()
+                .expect("I don't expect to handle negative years"),
+            m: value.month().try_into().unwrap(),
+            d: value.day().try_into().unwrap(),
+        }
+    }
+}
+impl TryFrom<Date> for jiff::civil::Date {
+    type Error = jiff::Error;
+
+    fn try_from(value: Date) -> Result<Self, Self::Error> {
+        Self::new(
+            value.y.try_into().map_err(|e| {
+                jiff::Error::from_args(format_args!("Year conv fail {:?} {}", value, e))
+            })?,
+            value.m.try_into().map_err(|e| {
+                jiff::Error::from_args(format_args!("Month conv fail {:?} {}", value, e))
+            })?,
+            value.d.try_into().map_err(|e| {
+                jiff::Error::from_args(format_args!("Day conv fail {:?} {}", value, e))
+            })?,
+        )
+    }
+}
+/// 24-hour time, not validated - could produce invalid times like 80:80
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Time {
+    h: u8,
+    m: u8,
+}
+impl From<(u8, u8)> for Time {
+    fn from(value: (u8, u8)) -> Self {
+        Self {
+            h: value.0,
+            m: value.1,
+        }
+    }
+}
+/// Note: ignores seconds, nanoseconds
+impl From<jiff::civil::Time> for Time {
+    fn from(value: jiff::civil::Time) -> Self {
+        Self {
+            // Both guaranteed to never panic, jiff guarantees good ranges for both
+            h: value.hour().try_into().unwrap(),
+            m: value.minute().try_into().unwrap(),
+        }
+    }
+}
+impl TryFrom<Time> for jiff::civil::Time {
+    type Error = jiff::Error;
+
+    fn try_from(value: Time) -> Result<Self, Self::Error> {
+        Self::new(
+            value.h.try_into().map_err(|e| {
+                jiff::Error::from_args(format_args!("Hour conv fail {:?} {}", value, e))
+            })?,
+            value.m.try_into().map_err(|e| {
+                jiff::Error::from_args(format_args!("Minute conv fail {:?} {}", value, e))
+            })?,
+            0,
+            0,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Value {
+    Number(f64),
+    Time(Time, Option<Date>),
+}
 
 fn is_ascii_num(c: u8) -> bool {
     c >= ('0' as u8) && c <= ('9' as u8)
