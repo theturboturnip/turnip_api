@@ -60,14 +60,13 @@ impl InternalConversion {
 }
 
 struct ComplexTz(SmolStr);
-impl std::fmt::Display for ComplexTz {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "\"{}\"", self.0)
+impl ComplexTz {
+    fn of(dt: &jiff::Zoned) -> Self {
+        Self(dt.time_zone().iana_name().unwrap().to_smolstr())
     }
 }
 
 pub struct TimeCtx {
-    db: &'static jiff::tz::TimeZoneDatabase,
     candidate_tzs: FnvHashMap<SmolStr, Vec<jiff::tz::TimeZone>>,
 }
 impl TimeCtx {
@@ -96,12 +95,15 @@ impl TimeCtx {
                 .push(tz.clone());
         }
 
+        let now = jiff::Timestamp::now();
         // Allow suffixes to translate to relevant timezones
         // e.g. "Eastern" => Canada/Eastern and US/Eastern
         // Also translate suffixes to be typable
         // e.g. "El Aaiun" => Africa/El_Aaiun
         // Also allow prefixes to be used
         // e.g. "US" => "US/Eastern", "US/Pacific", etc.
+        // Also allow abbreviations
+        // e.g. EST -> US/Eastern, EDT -> US/Eastern
         complex_tzs
             .iter()
             .map(|(name, tz)| {
@@ -122,16 +124,7 @@ impl TimeCtx {
                             .push(tz.clone());
                     }
                 }
-            })
-            .last();
 
-        let now = jiff::Timestamp::now();
-
-        // Allow abbreviations
-        // e.g. EST -> US/Eastern, EDT -> US/Eastern
-        complex_tzs
-            .iter()
-            .map(|(name, tz)| {
                 // For each unique TZ of the 5 transitions following now,
                 // add this timezone to their options
                 tz.following(now)
@@ -153,7 +146,7 @@ impl TimeCtx {
 
         // TODO sort timezones in the vectors by importance?
 
-        Self { db, candidate_tzs }
+        Self { candidate_tzs }
     }
 
     fn single_conversion(
@@ -194,8 +187,8 @@ impl TimeCtx {
 
         let out_dt = in_dt.with_time_zone(out_tz);
 
-        // Display the date for this transformation if it was directly specified OR if we cross a date boundary
-        let date_relevant = input_date.is_some() || (in_dt.date() != out_dt.date());
+        // Display the date for this transformation if it was directly specified
+        let date_relevant = input_date.is_some();
         Ok(InternalConversion::new(in_dt, out_dt, date_relevant))
     }
 
@@ -216,6 +209,21 @@ impl TimeCtx {
                 conv.out_dt.minute(),
                 conv.out_dt.date(),
             )
+        } else if conv.in_dt.date() != conv.out_dt.date() {
+            let delta = conv.out_dt.date() - conv.in_dt.date();
+            // This is in dates, not in other units, so days is the minimum
+            let days = delta.get_days();
+
+            format!(
+                "{:02}:{:02} {} in {} = {:02}:{:02} {:+} days (",
+                conv.in_dt.hour(),
+                conv.in_dt.minute(),
+                conv.in_z.abbrev,
+                conv.out_z.abbrev,
+                conv.out_dt.hour(),
+                conv.out_dt.minute(),
+                days,
+            )
         } else {
             format!(
                 "{:02}:{:02} {} in {} = {:02}:{:02} (",
@@ -228,7 +236,7 @@ impl TimeCtx {
             )
         };
 
-        if relevant_out_tzs.len() > 2 {
+        if relevant_out_tzs.len() <= 2 {
             let mut first = true;
             for t in relevant_out_tzs {
                 if !first {
@@ -238,7 +246,13 @@ impl TimeCtx {
                 first = false;
             }
         } else {
-            write!(c, "active in {}", relevant_out_tzs.len());
+            write!(
+                c,
+                "{}, {} more",
+                relevant_out_tzs[0].0,
+                relevant_out_tzs.len() - 1
+            )
+            .unwrap();
         }
         c.push_str(")");
 
@@ -270,25 +284,41 @@ impl TimeCtx {
             .ok_or("no output timezones")?;
 
         // Perform cartesian product of input and output tzs to do all of our conversions
+        // TODO more sorting?
         let conversions = input_tzs
             .into_iter()
             .map(|i| {
-                output_tzs.iter().filter_map(|o| {
-                    self.single_conversion(input_time, input_date, now, i.clone(), o.clone())
-                        .ok()
-                })
+                output_tzs
+                    .iter()
+                    .filter_map(|o| {
+                        self.single_conversion(input_time, input_date, now, i.clone(), o.clone())
+                            .ok()
+                    })
+                    // Deduplicate conversions with the same output tzoffset into single suggestions.
+                    // Create a set of (conversion, relevant_output_tzs)
+                    .fold(
+                        vec![],
+                        |mut v: Vec<(InternalConversion, Vec<ComplexTz>)>, c| {
+                            let o_complex_dt = ComplexTz::of(&c.out_dt);
+                            if let Some((prior_c, tzs)) =
+                                v.iter_mut().find(|c2| c2.0.out_z == c.out_z)
+                            {
+                                prior_c.date_relevant |= c.date_relevant;
+                                tzs.push(o_complex_dt);
+                            } else {
+                                v.push((c, vec![o_complex_dt]));
+                            }
+                            v
+                        },
+                    )
             })
             .flatten();
 
-        // TODO deduplicate and sort.
-        let sorted_conversions = conversions;
-
-        extend.extend(sorted_conversions.into_iter().map(|conv| {
-            let tzs = vec![ComplexTz(
-                conv.out_dt.time_zone().iana_name().unwrap().to_smolstr(),
-            )];
-            self.render_conversion(conv, tzs)
-        }));
+        extend.extend(
+            conversions
+                .into_iter()
+                .map(|(conv, tzs)| self.render_conversion(conv, tzs)),
+        );
 
         Ok(())
     }

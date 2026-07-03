@@ -48,7 +48,7 @@ impl ConversionCtx {
                 }
             }
             Value::Time(input_time, input_date) => {
-                self.time.attempt_conversion(
+                let _ = self.time.attempt_conversion(
                     input_time,
                     input_date,
                     input_unit,
