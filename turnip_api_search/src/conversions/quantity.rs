@@ -759,18 +759,15 @@ impl QuantityCtx {
             input_units
                 .into_iter()
                 .map(|i| {
-                    output_units
-                        .iter()
-                        .filter_map(|o| {
-                            let v = self.attempt_convert(*i, input_val, *o)?;
-                            self.render_conversion(InternalConversion {
-                                input_unit: *i,
-                                input_val,
-                                output_unit: *o,
-                                output_val: v,
-                            })
+                    output_units.iter().filter_map(|o| {
+                        let v = self.attempt_convert(*i, input_val, *o)?;
+                        self.render_conversion(InternalConversion {
+                            input_unit: *i,
+                            input_val,
+                            output_unit: *o,
+                            output_val: v,
                         })
-                        .collect::<Vec<_>>()
+                    })
                 })
                 .flatten(),
         );

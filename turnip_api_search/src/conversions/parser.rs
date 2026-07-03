@@ -9,6 +9,11 @@
 //! conversion := i  " in " unit
 //! ```
 
+//!
+//! TODO times should be parseable as H:MM AM (H <= 12), HMM AM (H <= 12), H:MM PM (H <= 12), HMM PM (H <= 12), HHMM (H <= 23, assume 24hr)
+//! dates should be parseable as YYYY-MM-DD, YYYY MM DD, DD m YYYY (where m = a month name or abbreviation march/mar), or a weekday (sunday|saturday|etc.) which is interpreted local to the current system clock in the input timezone.
+//!     - see https://web.library.yale.edu/cataloging/months
+
 use nom::{
     IResult, Parser,
     branch::alt,
