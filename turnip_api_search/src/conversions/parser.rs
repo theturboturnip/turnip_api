@@ -72,22 +72,52 @@ impl TryFrom<Date> for jiff::civil::Date {
 pub struct Time {
     h: u8,
     m: u8,
+    pub render_24hr: bool,
+}
+impl std::fmt::Display for Time {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.render_24hr {
+            write!(f, "{:02}:{:02}", self.h, self.m)
+        } else if self.h == 0 && self.m == 0 {
+            write!(f, "Midnight")
+        } else if self.h == 12 && self.m == 0 {
+            write!(f, "Noon")
+        } else {
+            let (h, tag) = if self.h == 0 {
+                (12, "am")
+            } else if self.h < 12 {
+                (self.h, "am")
+            } else if self.h == 12 {
+                (12, "pm")
+            } else {
+                (self.h - 12, "pm")
+            };
+
+            if self.m > 0 {
+                write!(f, "{}:{:02}{}", h, self.m, tag)
+            } else {
+                write!(f, "{}{}", h, tag)
+            }
+        }
+    }
 }
 impl From<(u8, u8)> for Time {
     fn from(value: (u8, u8)) -> Self {
         Self {
             h: value.0,
             m: value.1,
+            render_24hr: true,
         }
     }
 }
 /// Note: ignores seconds, nanoseconds
-impl From<jiff::civil::Time> for Time {
-    fn from(value: jiff::civil::Time) -> Self {
+impl From<(jiff::civil::Time, bool)> for Time {
+    fn from(value: (jiff::civil::Time, bool)) -> Self {
         Self {
             // Both guaranteed to never panic, jiff guarantees good ranges for both
-            h: value.hour().try_into().unwrap(),
-            m: value.minute().try_into().unwrap(),
+            h: value.0.hour().try_into().unwrap(),
+            m: value.0.minute().try_into().unwrap(),
+            render_24hr: value.1,
         }
     }
 }
@@ -219,8 +249,14 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
         _ => unreachable!(),
     };
 
-    Ok((rem, Time { h, m }))
+    // Times should be rendered in 24hr mode if they weren't input with am/pm
+    // TODO is it an ambiguity if the user enters 1:00 or 12:00? Should I use force AM/PM to make sure it always states "1pm" or "noon" in either case?
+    let render_24hr = am_pm.is_none();
+
+    Ok((rem, Time { h, m, render_24hr }))
 }
+
+// TODO parse noon and midnight
 
 #[test]
 fn test_parse_time() {

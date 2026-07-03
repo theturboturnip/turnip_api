@@ -1,16 +1,19 @@
-//! timezones are parsed from the international TZ database
+//! Converts between timezones.
+//!
+//! timezones are parsed from the international TZ database via jiff.
 //! https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 //!
-//! A token identifies a timezone IF it is an any-case variant of a 'candidate timezone name'.
-//! The list of candidates is built as follows:
-//! - If a country code has exactly one 'TZ Identifier' at boot time, or maps to exactly one unique SDT/DST pair, it is a candidate.
-//!     - e.g. germany = DE = Europe/Berlin & Europe/Zurich but both map to (CET, CEST)
-//!     - watch out for ambiguities e.g. "LA" = Lao, not Los Angeles.
-//!         - For these cases, ensure that out_country uses a human-readable version of the TZ identifier - they will realise that Asia/Bangkok is not right.
-//!         - also, this should
-//! - For every TZ identifier for a canonical time zone, split on '/':
-//!     - If the last component is unique in the set of candidates, it is a candidate
-//! - Every time zone abbreviation is a candidate
+//! Conversion is done as follows:
+//! for the given input and output strings, find all related complex timezones.
+//! This is precomputed at start-of-day:
+//! - complex TZ names e.g. "US/Eastern" translate directly
+//! - prefix/suffixes e.g. "US", "Eastern" translate to all complex TZs with that prefix/suffix e.g. ["US/Eastern", "US/Central"] and ["US/Eastern, "Canada/Eastern"]
+//! - abbreviations e.g. "GMT", "EST" translate to all complex TZs that use them e.g. "Etc/GMT, GMT", "America/Indiana/Indianapolis"
+//!
+//! TODO use user location to prioritize which complex TZ is most important i.e. theirs?
+//! then, compute the cartesian product of conversions between the candidate input/outputs.
+//! (this technique means that if you specify EST, which maps to a bunch of US complex timezones, and all of then are actually using E*D*T on the date specified, only EDT will be returned. This is a feature! Either you specified a day where EDT was used, or you didn't specify a date and we assumed today/tomorrow (whichever puts the time in the future). If you actually *meant* the conversion for a specific date, you have to enter the date too. )
+//!
 
 use arrayvec::ArrayVec;
 use fnv::FnvHashMap;
@@ -157,7 +160,7 @@ impl TimeCtx {
 
         in_tz: jiff::tz::TimeZone,
         out_tz: jiff::tz::TimeZone,
-    ) -> Result<InternalConversion, DebugError> {
+    ) -> Result<InternalConversion, IgnoreError> {
         // Given the plain time and date, interpret them in the input_tz. If no date, pick the nearest instance of this time in the future.
         let in_dt: jiff::Zoned = match input_date {
             Some(input_date) => jiff::civil::DateTime::new(
@@ -196,17 +199,18 @@ impl TimeCtx {
         &self,
         conv: InternalConversion,
         relevant_out_tzs: Vec<ComplexTz>,
+        render_24hr: bool,
     ) -> Conversion {
         let mut c = if conv.date_relevant {
             format!(
-                "{:02}:{:02} {} {} in {} = {:02}:{:02} {} (",
-                conv.in_dt.hour(),
-                conv.in_dt.minute(),
-                conv.in_dt.date(),
+                "{} {} {} in {} = {} {} {} (",
+                Time::from((conv.in_dt.time(), render_24hr)),
                 conv.in_z.abbrev,
+                conv.in_dt.date(),
                 conv.out_z.abbrev,
-                conv.out_dt.hour(),
-                conv.out_dt.minute(),
+                // =
+                Time::from((conv.out_dt.time(), render_24hr)),
+                conv.out_z.abbrev,
                 conv.out_dt.date(),
             )
         } else if conv.in_dt.date() != conv.out_dt.date() {
@@ -214,25 +218,37 @@ impl TimeCtx {
             // This is in dates, not in other units, so days is the minimum
             let days = delta.get_days();
 
-            format!(
-                "{:02}:{:02} {} in {} = {:02}:{:02} {:+} days (",
-                conv.in_dt.hour(),
-                conv.in_dt.minute(),
-                conv.in_z.abbrev,
-                conv.out_z.abbrev,
-                conv.out_dt.hour(),
-                conv.out_dt.minute(),
-                days,
-            )
+            if days == 1 {
+                format!(
+                    "{} {} in {} = {} {} next day (",
+                    Time::from((conv.in_dt.time(), render_24hr)),
+                    conv.in_z.abbrev,
+                    conv.out_z.abbrev,
+                    // =
+                    Time::from((conv.out_dt.time(), render_24hr)),
+                    conv.out_z.abbrev,
+                )
+            } else {
+                format!(
+                    "{} {} in {} = {} {} {:+} days (",
+                    Time::from((conv.in_dt.time(), render_24hr)),
+                    conv.in_z.abbrev,
+                    conv.out_z.abbrev,
+                    // =
+                    Time::from((conv.out_dt.time(), render_24hr)),
+                    conv.out_z.abbrev,
+                    days,
+                )
+            }
         } else {
             format!(
-                "{:02}:{:02} {} in {} = {:02}:{:02} (",
-                conv.in_dt.hour(),
-                conv.in_dt.minute(),
+                "{} {} in {} = {} {} (",
+                Time::from((conv.in_dt.time(), render_24hr)),
                 conv.in_z.abbrev,
                 conv.out_z.abbrev,
-                conv.out_dt.hour(),
-                conv.out_dt.minute(),
+                // =
+                Time::from((conv.out_dt.time(), render_24hr)),
+                conv.out_z.abbrev,
             )
         };
 
@@ -267,6 +283,7 @@ impl TimeCtx {
         output_unit: &SmolStr,
         extend: &mut Vec<Conversion>,
     ) -> Result<(), DebugError> {
+        let render_24hr = input_time.render_24hr;
         let input_time: jiff::civil::Time = input_time.try_into()?;
         let input_date: Option<jiff::civil::Date> = match input_date {
             Some(input_date) => Some(input_date.try_into()?),
@@ -317,7 +334,7 @@ impl TimeCtx {
         extend.extend(
             conversions
                 .into_iter()
-                .map(|(conv, tzs)| self.render_conversion(conv, tzs)),
+                .map(|(conv, tzs)| self.render_conversion(conv, tzs, render_24hr)),
         );
 
         Ok(())
