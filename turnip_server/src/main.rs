@@ -52,6 +52,10 @@ impl<'a> ServerCtx<'a> {
         let req = ApiRequest::new(&req)?;
         Ok(AuthedRequest::new(turnip_api_search::Auth, req))
     }
+
+    pub fn poke(&self) {
+        // Does nothing but forces lazy_static to come online
+    }
 }
 
 async fn api_route(req: Request<hyper::body::Incoming>) -> Result<ApiResponse, ApiError> {
@@ -143,6 +147,8 @@ lazy_static::lazy_static! {
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
     pretty_env_logger::init();
+
+    ctx.poke();
 
     // This address is localhost
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
