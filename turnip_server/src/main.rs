@@ -9,6 +9,7 @@ use hyper::{Method, Request};
 use hyper_util::rt::tokio::TokioIo;
 use lazy_static;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use turnip_api::placeholder_url::{PlaceholderEncoding, PlaceholderUrl};
 use turnip_api::{util::AnyError, ApiError, ApiRequest, ApiResponse, AuthedRequest, ExternalApi};
@@ -114,11 +115,13 @@ lazy_static::lazy_static! {
     static ref GOOGLE_SUGG_API: BasicExternalApi = ext_api::google_sugg_api();
     static ref KAGI_SUGG_API: BasicExternalApi = ext_api::kagi_sugg_api();
     static ref WIKIPEDIA_API: BasicExternalApi = ext_api::wikipedia_api();
+
     static ref TMDB_API: Option<BasicExternalApi> = option_env!("TMDB_KEY").map(|key| ext_api::tmdb_api(key.to_owned()));
     static ref TMDB_API_GENERIC: Option<&'static dyn ExternalApi> = TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi);
 
-    // TODO kagi autosuggest API?         // https://kagi.com/api/autosuggest?q=%s
-    // probably needs cookie/auth
+    static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = option_env!("OPEN_EXCHANGE_RATES_KEY").map(|key| ext_api::open_currency_api(key.to_owned()));
+    static ref OPEN_CURRENCY_API_GENERIC: Option<&'static dyn ExternalApi> = OPEN_CURRENCY_API.as_ref().map(|x| x as &'static dyn ExternalApi);
+
     // TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=wt-wt&q=
     // but handles things differently to Kagi!
 
@@ -139,6 +142,8 @@ lazy_static::lazy_static! {
 
             wolfram_search_url: PlaceholderUrl { prefix: "https://www.wolframalpha.com/input/?i=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
 
+            currency_api: *OPEN_CURRENCY_API_GENERIC,
+
             convs: turnip_api_search::conversions::ConversionCtx::new(),
         }),
     };
@@ -148,7 +153,24 @@ lazy_static::lazy_static! {
 async fn main() -> Result<(), AnyError> {
     pretty_env_logger::init();
 
+    // Make sure all the lazy-statics lazily statically initialize
     ctx.poke();
+
+    // Bump the currencies
+    match ctx.ctx_search.as_ref() {
+        Some(search) => {
+            tokio::task::spawn(async {
+                let mut interval = tokio::time::interval(Duration::from_mins(120));
+
+                loop {
+                    interval.tick().await;
+                    log::info!("Updating currencies...");
+                    search.update_currencies().await;
+                }
+            });
+        }
+        None => log::info!("No currency API..."),
+    }
 
     // This address is localhost
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

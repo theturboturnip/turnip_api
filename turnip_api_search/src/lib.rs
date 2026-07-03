@@ -1,4 +1,5 @@
 use futures::{StreamExt, stream::FuturesOrdered};
+use jiff::{SignedDuration, ToSpan};
 use turnip_api::{ExtApiResponse, ExternalApi, log_external_err, swallow_as_external_err};
 
 use turnip_api::placeholder_url::PlaceholderUrl;
@@ -68,6 +69,9 @@ impl<'a> SuggestionDst<'a> {
             let sugg = if let Some((calc_request, _calc_result)) = sugg.split_once(" = ") {
                 // Only pass through the request, don't include the result - might confuse it
                 calc_request
+            } else if let Some((calc_request, _calc_result)) = sugg.split_once(" ≈ ") {
+                // Only pass through the request, don't include the result - might confuse it
+                calc_request
             } else {
                 sugg
             };
@@ -105,6 +109,7 @@ pub struct Ctx<'a> {
     pub wolfram_search_url: PlaceholderUrl<'a>,
 
     pub convs: conversions::ConversionCtx,
+    pub currency_api: Option<&'a dyn ExternalApi>,
 }
 impl<'a> Ctx<'a> {
     /// Redirect to an actual search engine with a search term
@@ -132,6 +137,37 @@ impl<'a> Ctx<'a> {
         turnip_api::ApiResponse::r302_redirect(&redirect_to)
     }
 
+    // Update currencies from external API
+    pub async fn update_currencies(&self) {
+        if let Some(currency_api) = self.currency_api {
+            let resp = currency_api
+                .make_get_request(
+                    "/latest.json",
+                    &[
+                        ("base", "USD"),
+                        ("prettyprint", "false"),
+                        ("show_alternative", "true"),
+                    ],
+                    None,
+                    &[],
+                )
+                .await;
+            if let Ok(resp) = resp {
+                if resp.status().is_success() {
+                    serde_json::from_slice(resp.body()).map_or_else(swallow_as_external_err!("OpenCurrencyAPI serde failure"), |open_currency_api_response| {
+                        self
+                            .convs
+                            .update_currency(&open_currency_api_response)
+                            .unwrap_or_else(log_external_err!(
+                                "OpenCurrencyAPI successfully parsed, but didn't update. JSON: {:?}",
+                                open_currency_api_response
+                            ))
+                    })
+                }
+            };
+        }
+    }
+
     /// Returns a list of words to use as suggestions.
     /// Should be formatted as JSON [original_query, [*suggestions]]
     pub async fn suggest(
@@ -156,8 +192,6 @@ impl<'a> Ctx<'a> {
         let mut external_futures = FuturesOrdered::new();
         let mut external_future_tags = vec![];
 
-        // TODO update currencies
-        // TODO figure out where to redirect suggested solutions to
         let mut suggestions = vec![];
         if let Some(convs) = self.convs.parse_and_convert(query.as_ref()) {
             suggestions.extend(convs.into_iter().map(|conv| match conv {

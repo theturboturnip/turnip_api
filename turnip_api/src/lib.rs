@@ -109,6 +109,7 @@ pub trait ExternalApi: Sync {
         headers: &'args [(&'args str, &'args str)],
     ) -> Pin<Box<dyn core::future::Future<Output = Result<ExtApiResponse, ApiError>> + Send + 's>>;
 }
+#[derive(Debug)]
 pub struct ExtApiResponse(StatusCode, Bytes);
 impl ExtApiResponse {
     pub fn new(s: StatusCode, b: Bytes) -> Self {

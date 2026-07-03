@@ -12,6 +12,7 @@ pub struct BasicExternalApi {
     domain: http::uri::Authority,
     path_start: String, // = "/"
     basic_headers: Vec<(String, String)>,
+    basic_query: Vec<(String, String)>,
     rate: RateLimiter,
     client: reqwest::Client,
 }
@@ -30,7 +31,12 @@ impl BasicExternalApi {
                 p_q.push('?');
             }
             let mut first = true;
-            for (k, v) in query {
+            for (k, v) in self
+                .basic_query
+                .iter()
+                .map(|(x, y)| (x.as_str(), y.as_str()))
+                .chain(query.into_iter().copied())
+            {
                 if !first {
                     p_q.push('&');
                 }
@@ -83,6 +89,8 @@ impl BasicExternalApi {
         let body = res.bytes().await?;
         // println!("got response {} {}", status, String::from_utf8_lossy(&body));
 
+        log::debug!("Got response {} {}", status, String::from_utf8_lossy(&body));
+
         Ok(turnip_api::ExtApiResponse::new(status, body))
     }
 }
@@ -111,7 +119,7 @@ impl turnip_api::ExternalApi for BasicExternalApi {
             Err(e) => return Box::pin(async move { Err(e) }),
         };
 
-        // dbg!(&req);
+        log::debug!("Requesting {:?}", &req);
 
         Box::pin(async move {
             self.internal_get_request(req)
@@ -155,6 +163,7 @@ pub fn wikipedia_api() -> BasicExternalApi {
             ("User-Agent".to_owned(), user_agent()),
             // more to come...?
         ],
+        basic_query: vec![],
         rate: RateLimiter::new(3), // Wikimedia limits at 200/min ~= 3/second
         client: reqwest::Client::new(),
     }
@@ -177,6 +186,7 @@ pub fn tmdb_api(access_token: String) -> BasicExternalApi {
             ),
             // more to come...?
         ],
+        basic_query: vec![],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
         client: reqwest::Client::new(),
     }
@@ -192,6 +202,7 @@ pub fn google_sugg_api() -> BasicExternalApi {
             ("User-Agent".to_owned(), user_agent()),
             // more to come...?
         ],
+        basic_query: vec![],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
         client: reqwest::Client::new(),
     }
@@ -207,6 +218,7 @@ pub fn kagi_sugg_api() -> BasicExternalApi {
             ("User-Agent".to_owned(), user_agent()),
             // more to come...?
         ],
+        basic_query: vec![],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
         client: reqwest::Client::new(),
     }
@@ -224,7 +236,24 @@ pub fn youtube_api(api_key: String) -> BasicExternalApi {
             ("Authorization".to_owned(), format!("Bearer {}", api_key)),
             // more to come...?
         ],
+        basic_query: vec![],
         rate: RateLimiter::new(100), // One hundred requests/second
+        client: reqwest::Client::new(),
+    }
+}
+
+/// Maybe this works, maybe it doesn't. it's a basic example.
+pub fn open_currency_api(api_key: String) -> BasicExternalApi {
+    BasicExternalApi {
+        scheme: Scheme::HTTPS,
+        domain: Authority::from_static("openexchangerates.org"),
+        path_start: "/api".to_owned(),
+        basic_headers: vec![],
+        basic_query: vec![
+            ("app_id".to_owned(), api_key),
+            // more to come...?
+        ],
+        rate: RateLimiter::new(100), // One hundred requests/second - should never get there
         client: reqwest::Client::new(),
     }
 }
