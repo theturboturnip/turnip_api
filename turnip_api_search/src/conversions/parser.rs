@@ -5,7 +5,7 @@
 //! time := ((x:yy|xx:yy)(am|pm)?)|((x|xx)(am|pm))
 //! pos_num allows commas, treats '.' as decimal
 //! value := (time|date " " time|time " " date|pos_num)
-//! i := (value " "? unit: (u8, u8)|unit " "? value)
+//! i := (value " "? unit|unit " "? value)
 //! conversion := i  " in " unit
 //! ```
 
@@ -64,8 +64,8 @@ pub enum TimeRender {
 /// 24-hour time, not validated - could produce invalid times like 80:80
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Time {
-    h: u8,
-    m: u8,
+    h: i8,
+    m: i8,
     pub render: TimeRender,
 }
 impl std::fmt::Display for Time {
@@ -95,8 +95,8 @@ impl std::fmt::Display for Time {
         }
     }
 }
-impl From<(u8, u8, TimeRender)> for Time {
-    fn from(value: (u8, u8, TimeRender)) -> Self {
+impl From<(i8, i8, TimeRender)> for Time {
+    fn from(value: (i8, i8, TimeRender)) -> Self {
         Self {
             h: value.0,
             m: value.1,
@@ -109,8 +109,8 @@ impl From<(jiff::civil::Time, TimeRender)> for Time {
     fn from(value: (jiff::civil::Time, TimeRender)) -> Self {
         Self {
             // Both guaranteed to never panic, jiff guarantees good ranges for both
-            h: value.0.hour().try_into().unwrap(),
-            m: value.0.minute().try_into().unwrap(),
+            h: value.0.hour(),
+            m: value.0.minute(),
             render: value.1,
         }
     }
@@ -187,7 +187,7 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
     let (rem, h_str) = (digit1().map_res(|s: &str| if s.len() <= 2 { Ok(s) } else { Err(()) }))
         .parse_complete(v)?;
 
-    let h: u8 = h_str
+    let h: i8 = h_str
         .parse()
         .expect("1-2 digit string, always parses and fits");
 
@@ -203,7 +203,7 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
     let (rem, m, am_pm) = match m_match {
         Ok((rem, (_, m_str, am_pm))) => {
             // We got the full minute afterwards
-            let m: u8 = m_str
+            let m: i8 = m_str
                 .parse()
                 .expect("2 digit string, always parses and fits");
             (rem, m, am_pm.map(|(_, am_pm)| am_pm))
@@ -259,7 +259,7 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
 #[test]
 fn test_parse_time() {
     let assert_eq_t =
-        |str, t: (u8, u8, TimeRender)| assert_eq!(parse_time(str), Ok(("", t.into())));
+        |str, t: (i8, i8, TimeRender)| assert_eq!(parse_time(str), Ok(("", t.into())));
     use TimeRender::*;
 
     // Plain hours without AM/PM should fail
@@ -430,10 +430,10 @@ fn parse_value<'a>(v: &'a str) -> IResult<&'a str, Value> {
 
 #[test]
 fn test_parse_value() {
-    let assert_eq_t = |str, t: (u8, u8, TimeRender)| {
+    let assert_eq_t = |str, t: (i8, i8, TimeRender)| {
         assert_eq!(parse_value(str), Ok(("", Value::Time(t.into(), None))))
     };
-    let assert_eq_dt = |str, d: (i16, i8, i8), t: (u8, u8, TimeRender)| {
+    let assert_eq_dt = |str, d: (i16, i8, i8), t: (i8, i8, TimeRender)| {
         assert_eq!(
             parse_value(str),
             Ok(("", Value::Time(t.into(), Some(d.into()))))
