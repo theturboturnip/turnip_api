@@ -189,7 +189,7 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
 
     let h: u8 = h_str
         .parse()
-        .expect("Already know it's just integers, must parse");
+        .expect("1-2 digit string, always parses and fits");
 
     let m_match: IResult<&str, _> = (
         tag(":"),
@@ -205,7 +205,7 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
             // We got the full minute afterwards
             let m: u8 = m_str
                 .parse()
-                .expect("Already know it's just integers, must parse");
+                .expect("2 digit string, always parses and fits");
             (rem, m, am_pm.map(|(_, am_pm)| am_pm))
         }
         Err(_) => {
@@ -338,40 +338,33 @@ fn test_parse_time() {
     assert!(parse_time("One o'clock").is_err());
 }
 
-fn parse_pos_num(v: &str) -> IResult<&str, f64> {
+// Number parsing is two-pass: take a permissive grammar and output a strict float-string,
+// then parse that float-string with standard Rust parsing.
+fn parse_pos_num_str(v: &str) -> IResult<&str, String> {
     let (rem, digit_seq) = separated_list1(one_of(" ,_"), digit1()).parse_complete(v)?;
-    let n: u64 = digit_seq.into_iter().fold(0, |mut n, s: &str| {
-        for i in 0..s.len() {
-            n *= 10;
-        }
-        // TODO handle these errors if exceeds u64
-        n + s.parse::<u64>().unwrap()
+    // Create a full floating-point string without any of the weird separators,
+    // and then delegate to the standard Rust parser.
+    let mut float_str = digit_seq.into_iter().fold("".to_string(), |mut s, digits| {
+        s.push_str(digits);
+        s
     });
 
-    let mut f: f64 = n as f64;
     let (rem, opt_decimal) =
         opt((tag("."), separated_list1(one_of(" ,_"), digit1()))).parse_complete(rem)?;
     if let Some((_, digit_seq)) = opt_decimal {
-        let (n_decimal, n_max) =
-            digit_seq
-                .into_iter()
-                .fold((0u64, 1u64), |(mut n_decimal, mut n_max), s: &str| {
-                    for i in 0..s.len() {
-                        n_decimal *= 10;
-                        n_max *= 10;
-                    }
-                    // TODO handle these errors if exceeds u64
-                    (n_decimal + s.parse::<u64>().unwrap(), n_max)
-                });
-        let f_decimal = n_decimal as f64;
-        let f_max = n_max as f64;
-        let decimal = f_decimal / f_max;
-        f += decimal;
+        float_str.push('.');
+        float_str = digit_seq.into_iter().fold(float_str, |mut s, digits| {
+            s.push_str(digits);
+            s
+        });
     }
+    // TODO allow exponent-numbers in the above grammar, which the Rust parser can handle
 
-    // TODO exponent-numbers
+    Ok((rem, float_str))
+}
 
-    Ok((rem, f))
+fn parse_pos_num(v: &str) -> IResult<&str, f64> {
+    parse_pos_num_str.map_res(|f| f.parse()).parse_complete(v)
 }
 
 #[test]
@@ -393,7 +386,7 @@ fn test_parse_pos_num() {
         parse_pos_num(
             "1_000_00000000000000000000000000000000005.4321237846239843297923874293498327498237"
         )
-        .map(|(_, f)| f.is_infinite()),
+        .map(|(_, f)| f >= 1_000_00000000000000000000000000000000005.0),
         Ok(true)
     );
     // If the suffix is too large, precision will be dropped but the float will still be valid
