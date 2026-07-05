@@ -404,7 +404,9 @@ impl QuantityCtx {
         basic_unit_suffix(Time(Year), " years", "yrs", &["yr", "yrs", "year", "years"]);
 
         for (currency_str, _currency_written) in CURRENCIES {
-            let unit = Currency(CurrencyStr::from_str(currency_str).unwrap());
+            let unit = Currency(
+                CurrencyStr::from_str(currency_str).expect("CURRENCIES currency_str not 3-chars"),
+            );
 
             str_to_num_unit
                 .entry(NumberUnitStr::from(currency_str.to_ascii_lowercase()))
@@ -420,7 +422,10 @@ impl QuantityCtx {
                 .insert_entry(format!("{}", currency_str));
         }
         for (currency_symb, currency_str) in CURRENCY_PREFIXES {
-            let unit = Currency(CurrencyStr::from_str(currency_str).unwrap());
+            let unit = Currency(
+                CurrencyStr::from_str(currency_str)
+                    .expect("CURRENCY_PREFIXES currency_str not 3-chars"),
+            );
             let currency_symb_str: String = [currency_symb].into_iter().collect();
 
             str_to_num_unit
@@ -438,25 +443,25 @@ impl QuantityCtx {
                 .scales(numfmt::Scales::none())
                 .comma(false)
                 .separator(',')
-                .unwrap()
+                .expect("',' is single byte")
                 .precision(numfmt::Precision::Unspecified),
             small_formatter: numfmt::Formatter::new()
                 .scales(numfmt::Scales::none())
                 .comma(false)
                 .separator(',')
-                .unwrap()
+                .expect("',' is single byte")
                 .precision(numfmt::Precision::Significance(4)),
             large_formatter: numfmt::Formatter::new()
                 .scales(numfmt::Scales::none())
                 .comma(false)
                 .separator(',')
-                .unwrap()
+                .expect("',' is single byte")
                 .precision(numfmt::Precision::Decimals(0)),
             huge_formatter: numfmt::Formatter::new()
                 .scales(numfmt::Scales::none())
                 .comma(false)
                 .separator(',')
-                .unwrap()
+                .expect("',' is single byte")
                 .precision(numfmt::Precision::Significance(4)),
         }
     }

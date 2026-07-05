@@ -65,7 +65,12 @@ impl InternalConversion {
 struct ComplexTz(SmolStr);
 impl ComplexTz {
     fn of(dt: &jiff::Zoned) -> Self {
-        Self(dt.time_zone().iana_name().unwrap().to_smolstr())
+        Self(
+            dt.time_zone()
+                .iana_name()
+                .expect("The only tzs that TimeCtx reasons about are those with iana_name")
+                .to_smolstr(),
+        )
     }
 }
 
@@ -85,10 +90,14 @@ impl TimeCtx {
                 if name.as_str() == "EST" {
                     return None;
                 }
-                Some((
-                    name.as_str().to_ascii_lowercase_smolstr(),
-                    db.get(name.as_str()).unwrap(),
-                ))
+                let tz = db
+                    .get(name.as_str())
+                    .expect("The db said this is available, it must be so");
+                if tz.iana_name().is_none() {
+                    log::error!("Complex time-zone '{}' {:?} was referenced by the database but somehow doesn't have IANA identifier?", name, tz);
+                    return None;
+                }
+                Some((name.as_str().to_ascii_lowercase_smolstr(), tz))
             })
             .collect::<Vec<_>>();
         for (name, tz) in complex_tzs.iter() {
@@ -268,7 +277,7 @@ impl TimeCtx {
                 relevant_out_tzs[0].0,
                 relevant_out_tzs.len() - 1
             )
-            .unwrap();
+            .expect("std::fmt::Write for String does not error");
         }
         c.push_str(")");
 

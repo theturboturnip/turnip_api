@@ -5,7 +5,7 @@ pub struct CurrencyStr([u8; 3]);
 impl CurrencyStr {
     pub fn from_str(s: &str) -> Option<Self> {
         const ASCII_UPPER_TO_LOWER_MASK: u8 = 0b00100000;
-        if s.len() >= 3 {
+        if s.len() == 3 {
             let b = s.as_bytes();
             Some(Self([
                 b[0] | ASCII_UPPER_TO_LOWER_MASK,
