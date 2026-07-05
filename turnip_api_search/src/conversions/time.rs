@@ -24,7 +24,7 @@ use turnip_api::util::{DebugError, IgnoreError};
 
 use crate::conversions::{
     Conversion,
-    parser::{Date, Time},
+    parser::{Date, Time, TimeRender},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -199,17 +199,17 @@ impl TimeCtx {
         &self,
         conv: InternalConversion,
         relevant_out_tzs: Vec<ComplexTz>,
-        render_24hr: bool,
+        render: TimeRender,
     ) -> Conversion {
         let mut c = if conv.date_relevant {
             format!(
                 "{} {} {} in {} = {} {} {} (",
-                Time::from((conv.in_dt.time(), render_24hr)),
+                Time::from((conv.in_dt.time(), render)),
                 conv.in_z.abbrev,
                 conv.in_dt.date(),
                 conv.out_z.abbrev,
                 // =
-                Time::from((conv.out_dt.time(), render_24hr)),
+                Time::from((conv.out_dt.time(), render)),
                 conv.out_z.abbrev,
                 conv.out_dt.date(),
             )
@@ -221,21 +221,21 @@ impl TimeCtx {
             if days == 1 {
                 format!(
                     "{} {} in {} = {} {} next day (",
-                    Time::from((conv.in_dt.time(), render_24hr)),
+                    Time::from((conv.in_dt.time(), render)),
                     conv.in_z.abbrev,
                     conv.out_z.abbrev,
                     // =
-                    Time::from((conv.out_dt.time(), render_24hr)),
+                    Time::from((conv.out_dt.time(), render)),
                     conv.out_z.abbrev,
                 )
             } else {
                 format!(
                     "{} {} in {} = {} {} {:+} days (",
-                    Time::from((conv.in_dt.time(), render_24hr)),
+                    Time::from((conv.in_dt.time(), render)),
                     conv.in_z.abbrev,
                     conv.out_z.abbrev,
                     // =
-                    Time::from((conv.out_dt.time(), render_24hr)),
+                    Time::from((conv.out_dt.time(), render)),
                     conv.out_z.abbrev,
                     days,
                 )
@@ -243,11 +243,11 @@ impl TimeCtx {
         } else {
             format!(
                 "{} {} in {} = {} {} (",
-                Time::from((conv.in_dt.time(), render_24hr)),
+                Time::from((conv.in_dt.time(), render)),
                 conv.in_z.abbrev,
                 conv.out_z.abbrev,
                 // =
-                Time::from((conv.out_dt.time(), render_24hr)),
+                Time::from((conv.out_dt.time(), render)),
                 conv.out_z.abbrev,
             )
         };
@@ -283,7 +283,7 @@ impl TimeCtx {
         output_unit: &SmolStr,
         extend: &mut Vec<Conversion>,
     ) -> Result<(), DebugError> {
-        let render_24hr = input_time.render_24hr;
+        let render_24hr = input_time.render;
         let input_time: jiff::civil::Time = input_time.try_into()?;
         let input_date: Option<jiff::civil::Date> = match input_date {
             Some(input_date) => Some(input_date.try_into()?),

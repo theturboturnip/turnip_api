@@ -25,12 +25,12 @@ use nom::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Date {
-    y: u16,
-    m: u8,
-    d: u8,
+    y: i16,
+    m: i8,
+    d: i8,
 }
-impl From<(u16, u8, u8)> for Date {
-    fn from(value: (u16, u8, u8)) -> Self {
+impl From<(i16, i8, i8)> for Date {
+    fn from(value: (i16, i8, i8)) -> Self {
         Self {
             y: value.0,
             m: value.1,
@@ -41,12 +41,9 @@ impl From<(u16, u8, u8)> for Date {
 impl From<jiff::civil::Date> for Date {
     fn from(value: jiff::civil::Date) -> Self {
         Self {
-            y: value
-                .year()
-                .try_into()
-                .expect("I don't expect to handle negative years"),
-            m: value.month().try_into().unwrap(),
-            d: value.day().try_into().unwrap(),
+            y: value.year(),
+            m: value.month(),
+            d: value.day(),
         }
     }
 }
@@ -54,29 +51,26 @@ impl TryFrom<Date> for jiff::civil::Date {
     type Error = jiff::Error;
 
     fn try_from(value: Date) -> Result<Self, Self::Error> {
-        Self::new(
-            value.y.try_into().map_err(|e| {
-                jiff::Error::from_args(format_args!("Year conv fail {:?} {}", value, e))
-            })?,
-            value.m.try_into().map_err(|e| {
-                jiff::Error::from_args(format_args!("Month conv fail {:?} {}", value, e))
-            })?,
-            value.d.try_into().map_err(|e| {
-                jiff::Error::from_args(format_args!("Day conv fail {:?} {}", value, e))
-            })?,
-        )
+        Self::new(value.y, value.m, value.d)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TimeRender {
+    AmPm,
+    Military,
+}
+
 /// 24-hour time, not validated - could produce invalid times like 80:80
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Time {
     h: u8,
     m: u8,
-    pub render_24hr: bool,
+    pub render: TimeRender,
 }
 impl std::fmt::Display for Time {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.render_24hr {
+        if self.render == TimeRender::Military {
             write!(f, "{:02}:{:02}", self.h, self.m)
         } else if self.h == 0 && self.m == 0 {
             write!(f, "Midnight")
@@ -101,23 +95,23 @@ impl std::fmt::Display for Time {
         }
     }
 }
-impl From<(u8, u8)> for Time {
-    fn from(value: (u8, u8)) -> Self {
+impl From<(u8, u8, TimeRender)> for Time {
+    fn from(value: (u8, u8, TimeRender)) -> Self {
         Self {
             h: value.0,
             m: value.1,
-            render_24hr: true,
+            render: value.2,
         }
     }
 }
 /// Note: ignores seconds, nanoseconds
-impl From<(jiff::civil::Time, bool)> for Time {
-    fn from(value: (jiff::civil::Time, bool)) -> Self {
+impl From<(jiff::civil::Time, TimeRender)> for Time {
+    fn from(value: (jiff::civil::Time, TimeRender)) -> Self {
         Self {
             // Both guaranteed to never panic, jiff guarantees good ranges for both
             h: value.0.hour().try_into().unwrap(),
             m: value.0.minute().try_into().unwrap(),
-            render_24hr: value.1,
+            render: value.1,
         }
     }
 }
@@ -177,7 +171,7 @@ fn parse_date(v: &str) -> IResult<&str, Date> {
 
 #[test]
 fn test_parse_date() {
-    let assert_eq_d = |str, d: (u16, u8, u8)| assert_eq!(parse_date(str), Ok(("", d.into())));
+    let assert_eq_d = |str, d: (i16, i8, i8)| assert_eq!(parse_date(str), Ok(("", d.into())));
 
     assert_eq_d("2026-01-01", (2026, 1, 1));
     assert_eq_d("2026-1-01", (2026, 1, 1));
@@ -251,84 +245,90 @@ fn parse_time(v: &str) -> IResult<&str, Time> {
 
     // Times should be rendered in 24hr mode if they weren't input with am/pm
     // TODO is it an ambiguity if the user enters 1:00 or 12:00? Should I use force AM/PM to make sure it always states "1pm" or "noon" in either case?
-    let render_24hr = am_pm.is_none();
+    let render = if am_pm.is_some() {
+        TimeRender::AmPm
+    } else {
+        TimeRender::Military
+    };
 
-    Ok((rem, Time { h, m, render_24hr }))
+    Ok((rem, Time { h, m, render }))
 }
 
 // TODO parse noon and midnight
 
 #[test]
 fn test_parse_time() {
-    let assert_eq_t = |str, t: (u8, u8)| assert_eq!(parse_time(str), Ok(("", t.into())));
+    let assert_eq_t =
+        |str, t: (u8, u8, TimeRender)| assert_eq!(parse_time(str), Ok(("", t.into())));
+    use TimeRender::*;
 
     // Plain hours without AM/PM should fail
     assert!(parse_time("05").is_err());
     assert!(parse_time("5").is_err());
 
     // Test plain hours in the AM
-    assert_eq_t("05am", (5, 00));
-    assert_eq_t("5am", (5, 00));
-    assert_eq_t("05 am", (5, 00));
-    assert_eq_t("5 am", (5, 00));
+    assert_eq_t("05am", (5, 00, AmPm));
+    assert_eq_t("5am", (5, 00, AmPm));
+    assert_eq_t("05 am", (5, 00, AmPm));
+    assert_eq_t("5 am", (5, 00, AmPm));
 
     // Test plain hours in the PM
-    assert_eq_t("05pm", (17, 00));
-    assert_eq_t("5pm", (17, 00));
-    assert_eq_t("05 pm", (17, 00));
-    assert_eq_t("5 pm", (17, 00));
+    assert_eq_t("05pm", (17, 00, AmPm));
+    assert_eq_t("5pm", (17, 00, AmPm));
+    assert_eq_t("05 pm", (17, 00, AmPm));
+    assert_eq_t("5 pm", (17, 00, AmPm));
 
     // AM plain hour wrapping - 12am = midnight, past that is wrong and just take 13
-    assert_eq_t("10am", (10, 00));
-    assert_eq_t("11am", (11, 00));
-    assert_eq_t("12am", (0, 00));
-    assert_eq_t("13am", (13, 00)); // Degenerate case
+    assert_eq_t("10am", (10, 00, AmPm));
+    assert_eq_t("11am", (11, 00, AmPm));
+    assert_eq_t("12am", (0, 00, AmPm));
+    assert_eq_t("13am", (13, 00, AmPm)); // Degenerate case
 
     // PM plain hour wrapping - 12pm = midday, past that is wrong and just take 13
-    assert_eq_t("10pm", (22, 00));
-    assert_eq_t("11pm", (23, 00));
-    assert_eq_t("12pm", (12, 00));
-    assert_eq_t("13pm", (13, 00)); // Degenerate case
+    assert_eq_t("10pm", (22, 00, AmPm));
+    assert_eq_t("11pm", (23, 00, AmPm));
+    assert_eq_t("12pm", (12, 00, AmPm));
+    assert_eq_t("13pm", (13, 00, AmPm)); // Degenerate case
 
     // Hour-minute pairs work without AM/PM
-    assert_eq_t("05:38", (5, 38));
-    assert_eq_t("5:38", (5, 38));
-    assert_eq_t("17:38", (17, 38));
+    assert_eq_t("05:38", (5, 38, Military));
+    assert_eq_t("5:38", (5, 38, Military));
+    assert_eq_t("17:38", (17, 38, Military));
 
     // Test hour-minute pairs in the AM
-    assert_eq_t("05:38am", (5, 38));
-    assert_eq_t("5:38am", (5, 38));
-    assert_eq_t("17:38am", (17, 38)); // Degenerate case
-    assert_eq_t("05:38 am", (5, 38));
-    assert_eq_t("5:38 am", (5, 38));
-    assert_eq_t("17:38 am", (17, 38)); // Degenerate case
+    assert_eq_t("05:38am", (5, 38, AmPm));
+    assert_eq_t("5:38am", (5, 38, AmPm));
+    assert_eq_t("17:38am", (17, 38, AmPm)); // Degenerate case
+    assert_eq_t("05:38 am", (5, 38, AmPm));
+    assert_eq_t("5:38 am", (5, 38, AmPm));
+    assert_eq_t("17:38 am", (17, 38, AmPm)); // Degenerate case
 
     // Test hour-minute pairs in the PM
-    assert_eq_t("05:38pm", (17, 38));
-    assert_eq_t("5:38pm", (17, 38));
-    assert_eq_t("17:38pm", (17, 38)); // Degenerate case
-    assert_eq_t("05:38 pm", (17, 38));
-    assert_eq_t("5:38 pm", (17, 38));
-    assert_eq_t("17:38 pm", (17, 38)); // Degenerate case
+    assert_eq_t("05:38pm", (17, 38, AmPm));
+    assert_eq_t("5:38pm", (17, 38, AmPm));
+    assert_eq_t("17:38pm", (17, 38, AmPm)); // Degenerate case
+    assert_eq_t("05:38 pm", (17, 38, AmPm));
+    assert_eq_t("5:38 pm", (17, 38, AmPm));
+    assert_eq_t("17:38 pm", (17, 38, AmPm)); // Degenerate case
 
     // AM hour-minute wrapping - 12am = midnight, hours beyond that are wrong and just take 13
-    assert_eq_t("11:58am", (11, 58));
-    assert_eq_t("11:59am", (11, 59));
-    assert_eq_t("12:00am", (0, 00));
-    assert_eq_t("12:01am", (0, 1));
-    assert_eq_t("12:59am", (0, 59));
-    assert_eq_t("13:00am", (13, 00)); // Degenerate case
+    assert_eq_t("11:58am", (11, 58, AmPm));
+    assert_eq_t("11:59am", (11, 59, AmPm));
+    assert_eq_t("12:00am", (0, 00, AmPm));
+    assert_eq_t("12:01am", (0, 1, AmPm));
+    assert_eq_t("12:59am", (0, 59, AmPm));
+    assert_eq_t("13:00am", (13, 00, AmPm)); // Degenerate case
 
     // PM plain hour wrapping - 12pm = midday, past that is wrong and just take 13
-    assert_eq_t("11:58pm", (23, 58));
-    assert_eq_t("11:59pm", (23, 59));
-    assert_eq_t("12:00pm", (12, 00));
-    assert_eq_t("12:01pm", (12, 1));
-    assert_eq_t("12:59pm", (12, 59));
-    assert_eq_t("13:00pm", (13, 00)); // Degenerate case
+    assert_eq_t("11:58pm", (23, 58, AmPm));
+    assert_eq_t("11:59pm", (23, 59, AmPm));
+    assert_eq_t("12:00pm", (12, 00, AmPm));
+    assert_eq_t("12:01pm", (12, 1, AmPm));
+    assert_eq_t("12:59pm", (12, 59, AmPm));
+    assert_eq_t("13:00pm", (13, 00, AmPm)); // Degenerate case
 
     // TODO need to figure out how to handle this
-    assert_eq_t("26:39", (26, 39));
+    assert_eq_t("26:39", (26, 39, Military));
 
     // Just a number on its own is wrong
     assert!(parse_time("1").is_err());
@@ -388,8 +388,20 @@ fn test_parse_pos_num() {
     assert_eq_f("5.4321", 5.4321);
     assert_eq_f("1_000_005.4321", 1000005.4321);
 
-    // TODO this will break if the suffix exceeds u64, in general I haven't tested on big numbers
-    // assert_eq_f("1_000_005.4321237846239843297923874293498327498237", 1000005.4321);
+    // If the prefix is too large, precision will be dropped and the float will still parse
+    assert_eq!(
+        parse_pos_num(
+            "1_000_00000000000000000000000000000000005.4321237846239843297923874293498327498237"
+        )
+        .map(|(_, f)| f.is_infinite()),
+        Ok(true)
+    );
+    // If the suffix is too large, precision will be dropped but the float will still be valid
+    assert_eq!(
+        parse_pos_num("1_000_005.4321237846239843297923874293498327498237")
+            .map(|(_, f)| f > 1000005.4 && f < 1000005.5),
+        Ok(true)
+    );
 
     // Hex and binary don't work - this is sad,
     assert_eq!(parse_pos_num("0xabCDeF12").unwrap(), ("xabCDeF12", 0.0));
@@ -425,9 +437,10 @@ fn parse_value<'a>(v: &'a str) -> IResult<&'a str, Value> {
 
 #[test]
 fn test_parse_value() {
-    let assert_eq_t =
-        |str, t: (u8, u8)| assert_eq!(parse_value(str), Ok(("", Value::Time(t.into(), None))));
-    let assert_eq_dt = |str, d: (u16, u8, u8), t: (u8, u8)| {
+    let assert_eq_t = |str, t: (u8, u8, TimeRender)| {
+        assert_eq!(parse_value(str), Ok(("", Value::Time(t.into(), None))))
+    };
+    let assert_eq_dt = |str, d: (i16, i8, i8), t: (u8, u8, TimeRender)| {
         assert_eq!(
             parse_value(str),
             Ok(("", Value::Time(t.into(), Some(d.into()))))
@@ -435,14 +448,16 @@ fn test_parse_value() {
     };
     let assert_eq_f = |str, f| assert_eq!(parse_value(str), Ok(("", Value::Number(f))));
 
+    use TimeRender::*;
+
     // Date-then-time
     {
-        assert_eq_dt("2026-01-01 12:59am", (2026, 1, 1), (00, 59));
-        assert_eq_dt("2026-1-01 12:59am", (2026, 1, 1), (00, 59));
-        assert_eq_dt("2026 12/13 12:59am", (2026, 12, 13), (00, 59));
-        assert_eq_dt("2026_10_10 12:59am", (2026, 10, 10), (00, 59));
+        assert_eq_dt("2026-01-01 12:59am", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("2026-1-01 12:59am", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("2026 12/13 12:59am", (2026, 12, 13), (00, 59, AmPm));
+        assert_eq_dt("2026_10_10 12:59am", (2026, 10, 10), (00, 59, AmPm));
         // TODO need to figure out how to handle this
-        assert_eq_dt("2026 25 25 99:70am", (2026, 25, 25), (99, 70));
+        assert_eq_dt("2026 25 25 99:70am", (2026, 25, 25), (99, 70, AmPm));
         // If someone forgets one of the parts, what happens?
         assert_eq!(
             parse_value("2026 25 99:70am"),
@@ -452,16 +467,26 @@ fn test_parse_value() {
 
     // Time-then-date
     {
-        assert_eq_dt("12:59am 2026-01-01", (2026, 1, 1), (00, 59));
-        assert_eq_dt("12:59am 2026-1-01", (2026, 1, 1), (00, 59));
-        assert_eq_dt("12:59am 2026 12/13", (2026, 12, 13), (00, 59));
-        assert_eq_dt("12:59am 2026_10_10", (2026, 10, 10), (00, 59));
+        assert_eq_dt("12:59am 2026-01-01", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("12:59am 2026-1-01", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("12:59am 2026 12/13", (2026, 12, 13), (00, 59, AmPm));
+        assert_eq_dt("12:59am 2026_10_10", (2026, 10, 10), (00, 59, AmPm));
         // TODO need to figure out how to handle this
-        assert_eq_dt("99:70am 2026 25 25", (2026, 25, 25), (99, 70));
+        assert_eq_dt("99:70am 2026 25 25", (2026, 25, 25), (99, 70, AmPm));
         // If someone forgets one of the parts, what happens?
         assert_eq!(
             parse_value("99:70am 2026 25"),
-            Ok((" 2026 25", Value::Time((99, 70).into(), None)))
+            Ok((
+                " 2026 25",
+                Value::Time(
+                    Time {
+                        h: 99,
+                        m: 70,
+                        render: AmPm
+                    },
+                    None
+                )
+            ))
         );
     }
 
@@ -472,68 +497,68 @@ fn test_parse_value() {
         assert_eq_f("5", 5.0);
 
         // Test plain hours in the AM
-        assert_eq_t("05am", (5, 00));
-        assert_eq_t("5am", (5, 00));
-        assert_eq_t("05 am", (5, 00));
-        assert_eq_t("5 am", (5, 00));
+        assert_eq_t("05am", (5, 00, AmPm));
+        assert_eq_t("5am", (5, 00, AmPm));
+        assert_eq_t("05 am", (5, 00, AmPm));
+        assert_eq_t("5 am", (5, 00, AmPm));
 
         // Test plain hours in the PM
-        assert_eq_t("05pm", (17, 00));
-        assert_eq_t("5pm", (17, 00));
-        assert_eq_t("05 pm", (17, 00));
-        assert_eq_t("5 pm", (17, 00));
+        assert_eq_t("05pm", (17, 00, AmPm));
+        assert_eq_t("5pm", (17, 00, AmPm));
+        assert_eq_t("05 pm", (17, 00, AmPm));
+        assert_eq_t("5 pm", (17, 00, AmPm));
 
         // AM plain hour wrapping - 12am = midnight, past that is wrong and just take 13
-        assert_eq_t("10am", (10, 00));
-        assert_eq_t("11am", (11, 00));
-        assert_eq_t("12am", (0, 00));
-        assert_eq_t("13am", (13, 00)); // Degenerate case
+        assert_eq_t("10am", (10, 00, AmPm));
+        assert_eq_t("11am", (11, 00, AmPm));
+        assert_eq_t("12am", (0, 00, AmPm));
+        assert_eq_t("13am", (13, 00, AmPm)); // Degenerate case
 
         // PM plain hour wrapping - 12pm = midday, past that is wrong and just take 13
-        assert_eq_t("10pm", (22, 00));
-        assert_eq_t("11pm", (23, 00));
-        assert_eq_t("12pm", (12, 00));
-        assert_eq_t("13pm", (13, 00)); // Degenerate case
+        assert_eq_t("10pm", (22, 00, AmPm));
+        assert_eq_t("11pm", (23, 00, AmPm));
+        assert_eq_t("12pm", (12, 00, AmPm));
+        assert_eq_t("13pm", (13, 00, AmPm)); // Degenerate case
 
         // Hour-minute pairs work without AM/PM
-        assert_eq_t("05:38", (5, 38));
-        assert_eq_t("5:38", (5, 38));
-        assert_eq_t("17:38", (17, 38));
+        assert_eq_t("05:38", (5, 38, Military));
+        assert_eq_t("5:38", (5, 38, Military));
+        assert_eq_t("17:38", (17, 38, Military));
 
         // Test hour-minute pairs in the AM
-        assert_eq_t("05:38am", (5, 38));
-        assert_eq_t("5:38am", (5, 38));
-        assert_eq_t("17:38am", (17, 38)); // Degenerate case
-        assert_eq_t("05:38 am", (5, 38));
-        assert_eq_t("5:38 am", (5, 38));
-        assert_eq_t("17:38 am", (17, 38)); // Degenerate case
+        assert_eq_t("05:38am", (5, 38, AmPm));
+        assert_eq_t("5:38am", (5, 38, AmPm));
+        assert_eq_t("17:38am", (17, 38, AmPm)); // Degenerate case
+        assert_eq_t("05:38 am", (5, 38, AmPm));
+        assert_eq_t("5:38 am", (5, 38, AmPm));
+        assert_eq_t("17:38 am", (17, 38, AmPm)); // Degenerate case
 
         // Test hour-minute pairs in the PM
-        assert_eq_t("05:38pm", (17, 38));
-        assert_eq_t("5:38pm", (17, 38));
-        assert_eq_t("17:38pm", (17, 38)); // Degenerate case
-        assert_eq_t("05:38 pm", (17, 38));
-        assert_eq_t("5:38 pm", (17, 38));
-        assert_eq_t("17:38 pm", (17, 38)); // Degenerate case
+        assert_eq_t("05:38pm", (17, 38, AmPm));
+        assert_eq_t("5:38pm", (17, 38, AmPm));
+        assert_eq_t("17:38pm", (17, 38, AmPm)); // Degenerate case
+        assert_eq_t("05:38 pm", (17, 38, AmPm));
+        assert_eq_t("5:38 pm", (17, 38, AmPm));
+        assert_eq_t("17:38 pm", (17, 38, AmPm)); // Degenerate case
 
         // AM hour-minute wrapping - 12am = midnight, hours beyond that are wrong and just take 13
-        assert_eq_t("11:58am", (11, 58));
-        assert_eq_t("11:59am", (11, 59));
-        assert_eq_t("12:00am", (0, 00));
-        assert_eq_t("12:01am", (0, 1));
-        assert_eq_t("12:59am", (0, 59));
-        assert_eq_t("13:00am", (13, 00)); // Degenerate case
+        assert_eq_t("11:58am", (11, 58, AmPm));
+        assert_eq_t("11:59am", (11, 59, AmPm));
+        assert_eq_t("12:00am", (0, 00, AmPm));
+        assert_eq_t("12:01am", (0, 1, AmPm));
+        assert_eq_t("12:59am", (0, 59, AmPm));
+        assert_eq_t("13:00am", (13, 00, AmPm)); // Degenerate case
 
         // PM plain hour wrapping - 12pm = midday, past that is wrong and just take 13
-        assert_eq_t("11:58pm", (23, 58));
-        assert_eq_t("11:59pm", (23, 59));
-        assert_eq_t("12:00pm", (12, 00));
-        assert_eq_t("12:01pm", (12, 1));
-        assert_eq_t("12:59pm", (12, 59));
-        assert_eq_t("13:00pm", (13, 00)); // Degenerate case
+        assert_eq_t("11:58pm", (23, 58, AmPm));
+        assert_eq_t("11:59pm", (23, 59, AmPm));
+        assert_eq_t("12:00pm", (12, 00, AmPm));
+        assert_eq_t("12:01pm", (12, 1, AmPm));
+        assert_eq_t("12:59pm", (12, 59, AmPm));
+        assert_eq_t("13:00pm", (13, 00, AmPm)); // Degenerate case
 
         // TODO need to figure out how to handle this
-        assert_eq_t("26:39", (26, 39));
+        assert_eq_t("26:39", (26, 39, Military));
 
         // Minutes must be two-digit, otherwise they are parsed as values
         assert_eq!(parse_value("1:1"), Ok((":1", Value::Number(1.0))));
