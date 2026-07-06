@@ -170,11 +170,23 @@ async fn main() -> Result<(), AnyError> {
         None => log::info!("No search API..."),
     }
 
-    // This address is localhost
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    // Bind to localhost at a specific port
+    let port = match std::env::var("TURNIP_SERVER_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        Some(port) => port,
+        None => {
+            log::warn!("Port not specified or TURNIP_SERVER_PORT env var not correctly set - defaulting to 3000");
+            3000
+        }
+    };
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
     // Bind to the port and listen for incoming TCP connections
     let listener = TcpListener::bind(addr).await?;
+
+    log::info!("Bound to {}", addr);
 
     loop {
         // When an incoming TCP connection is received grab a TCP stream for
