@@ -1,9 +1,8 @@
-//! Based on https://github.com/hyperium/hyper/blob/master/examples/hello-http2.rs
+//! Based on https://github.com/hyperium/hyper/blob/master/examples/hello-http2.rs - but doesn't use HTTP2 anymore
 
 // use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
-// use hyper::server::conn::http2;
 use hyper::service::service_fn;
 use hyper::{Method, Request};
 use hyper_util::rt::tokio::TokioIo;
@@ -114,16 +113,14 @@ async fn handle(
 lazy_static::lazy_static! {
     static ref GOOGLE_SUGG_API: BasicExternalApi = ext_api::google_sugg_api();
     static ref KAGI_SUGG_API: BasicExternalApi = ext_api::kagi_sugg_api();
+    // TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=en&q=
+    // but handles things differently to Kagi!
+
     static ref WIKIPEDIA_API: BasicExternalApi = ext_api::wikipedia_api();
 
-    static ref TMDB_API: Option<BasicExternalApi> = option_env!("TMDB_KEY").map(|key| ext_api::tmdb_api(key.to_owned()));
-    static ref TMDB_API_GENERIC: Option<&'static dyn ExternalApi> = TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi);
+    static ref TMDB_API: Option<BasicExternalApi> = std::env::var("TMDB_KEY").map(|key| ext_api::tmdb_api(key.to_owned())).ok();
 
-    static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = option_env!("OPEN_EXCHANGE_RATES_KEY").map(|key| ext_api::open_currency_api(key.to_owned()));
-    static ref OPEN_CURRENCY_API_GENERIC: Option<&'static dyn ExternalApi> = OPEN_CURRENCY_API.as_ref().map(|x| x as &'static dyn ExternalApi);
-
-    // TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=wt-wt&q=
-    // but handles things differently to Kagi!
+    static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = std::env::var("OPEN_EXCHANGE_RATES_KEY").map(|key| ext_api::open_currency_api(key.to_owned())).ok();
 
     static ref ctx: ServerCtx<'static> = ServerCtx {
         ctx_weather: None,
@@ -138,11 +135,11 @@ lazy_static::lazy_static! {
             wikipedia_api: Some(&(*WIKIPEDIA_API)),
 
             tmdb_search_url: PlaceholderUrl { prefix: "https://www.themoviedb.org/search?query=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
-            tmdb_api: *TMDB_API_GENERIC,
+            tmdb_api: TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi),
 
             wolfram_search_url: PlaceholderUrl { prefix: "https://www.wolframalpha.com/input/?i=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
 
-            currency_api: *OPEN_CURRENCY_API_GENERIC,
+            currency_api: OPEN_CURRENCY_API.as_ref().map(|x| x as &'static dyn ExternalApi),
 
             convs: turnip_api_search::conversions::ConversionCtx::new(),
         }),
@@ -193,7 +190,7 @@ async fn main() -> Result<(), AnyError> {
         let io = TokioIo::new(stream);
 
         // Spin up a new task in Tokio so we can continue to listen for new TCP connection on the
-        // current task without waiting for the processing of the HTTP/2 connection we just received
+        // current task without waiting for the processing of the connection we just received
         // to finish
         tokio::task::spawn(async move {
             if let Err(err) = http1::Builder::new()
