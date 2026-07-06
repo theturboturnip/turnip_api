@@ -1809,7 +1809,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "turnip_api_server"
+name = "turnip_api_weather"
+version = "0.1.0"
+dependencies = [
+ "turnip_api",
+]
+
+[[package]]
+name = "turnip_server"
 version = "0.1.0"
 dependencies = [
  "async-rate-limiter",
@@ -1829,13 +1836,6 @@ dependencies = [
  "turnip_api_looper",
  "turnip_api_search",
  "turnip_api_weather",
-]
-
-[[package]]
-name = "turnip_api_weather"
-version = "0.1.0"
-dependencies = [
- "turnip_api",
 ]
 
 [[package]]
