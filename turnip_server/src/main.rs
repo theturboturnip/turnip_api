@@ -119,6 +119,7 @@ lazy_static::lazy_static! {
             generic_search_urls: turnip_api_search::PerSearch::new(
                 PlaceholderUrl::from_url_prefix("https://google.com/search?q="),
                 PlaceholderUrl::from_url_prefix("https://kagi.com/search?q="),
+                PlaceholderUrl::from_url_prefix("https://duckduckgo.com/?q="),
             ),
             wikipedia_search_url:
                 PlaceholderUrl::from_url_prefix("https://en.wikipedia.org/w/index.php?search="),
@@ -131,6 +132,7 @@ lazy_static::lazy_static! {
                 generic_suggestion_apis: turnip_api_search::PerSearch::new(
                     ext_api::GOOGLE_SUGG_API.deref() as &'static dyn ExternalApi,
                     ext_api::KAGI_SUGG_API.deref() as &'static dyn ExternalApi,
+                    ext_api::DDG_SUGG_API.deref() as &'static dyn ExternalApi,
                 ),
 
                 wikipedia_api:

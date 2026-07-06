@@ -7,6 +7,7 @@ use crate::{PerSearch, SearchSuggestApi};
 
 mod conversions;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SuggestionDst {
     /// For suggestions pulled from the Wikipedia search API
     Wikipedia,
@@ -25,8 +26,10 @@ pub(crate) enum SuggestionDst {
 pub(crate) enum ExternalApiTag {
     Wikipedia,
     Tmdb,
-    /// for firefox-style suggestions, which I think are OpenSearch-compatible? But I'm not 100% sure.
+    /// for firefox-style suggestions, which I think are the OpenSearch schema? But I'm not 100% sure.
     OpenSearchSuggestion,
+    /// for the DuckDuckGo schema, which is [{"phrase": "x"}, {"phrase":"y"}, etc]
+    DuckDuckGoSuggestion,
 }
 
 pub struct Suggester<'a> {
@@ -72,7 +75,7 @@ impl<'a> Suggester<'a> {
         &self,
         query: &str,
         num_items_per_provider: usize,
-        backing: SearchSuggestApi,
+        backend: SearchSuggestApi,
     ) -> Result<Vec<(SuggestionDst, String)>, turnip_api::ApiError> {
         let mut external_futures = FuturesOrdered::new();
         let mut external_future_tags = vec![];
@@ -141,7 +144,7 @@ impl<'a> Suggester<'a> {
             }
         }
 
-        match (backing, self.generic_suggestion_apis.get(backing)) {
+        match (backend, self.generic_suggestion_apis.get(backend)) {
             (SearchSuggestApi::Google, sugg) => {
                 external_futures.push_back(sugg.make_get_request(
                     "",
@@ -161,6 +164,15 @@ impl<'a> Suggester<'a> {
                 ));
                 // firefox-style suggestion format
                 external_future_tags.push(ExternalApiTag::OpenSearchSuggestion);
+            }
+            (SearchSuggestApi::DuckDuckGo, sugg) => {
+                external_futures.push_back(sugg.make_get_request(
+                    "",
+                    &[("q", query.as_ref())],
+                    None,
+                    &[],
+                ));
+                external_future_tags.push(ExternalApiTag::DuckDuckGoSuggestion);
             }
         }
 
@@ -266,8 +278,34 @@ impl<'a> Suggester<'a> {
                         },
                     );
                 }
+                (ExternalApiTag::DuckDuckGoSuggestion, Ok(sugg_json))
+                    if sugg_json.status().is_success() =>
+                {
+                    serde_json::from_slice(sugg_json.body()).map_or_else(
+                        swallow_as_external_err!("Failed to parse generic suggestion JSON"),
+                        |sugg_json: serde_json::Value| {
+                            sugg_json
+                                .as_array()
+                                .map(|arr| {
+                                    arr.into_iter()
+                                        .filter_map(|s| s.get("phrase").and_then(|s| s.as_str()))
+                                        .collect::<Vec<&str>>()
+                                })
+                                .map_or_else(
+                                    log_external_err!("Sugg JSON had bad format"),
+                                    |suggs| {
+                                        suggestions.extend(
+                                            suggs
+                                                .into_iter()
+                                                .map(|s| (SuggestionDst::Search, s.to_owned())),
+                                        );
+                                    },
+                                );
+                        },
+                    );
+                }
                 (c, Ok(json)) => {
-                    log::info!(
+                    log::error!(
                         "Got fine response of kind {:?} back, status {}, left unhandled",
                         c,
                         json.status()

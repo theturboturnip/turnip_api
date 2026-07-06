@@ -184,7 +184,7 @@ pub static ref GOOGLE_SUGG_API: BasicExternalApi =
             // more to come...?
         ],
         basic_query: vec![],
-        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        rate: RateLimiter::new(1000), // Assume no real rate limit here
         client: reqwest::Client::new(),
     };
 
@@ -201,12 +201,30 @@ pub static ref KAGI_SUGG_API: BasicExternalApi =
             // more to come...?
         ],
         basic_query: vec![],
-        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        rate: RateLimiter::new(1000), // Assume no real rate limit here
         client: reqwest::Client::new(),
     };
 
-// TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=en&q=
-// but handles things differently to Kagi!
+/// Search suggestions from the DuckDuckGo autosuggestion API.
+///
+/// Uses uk-en region i.e. united kingdom english <https://docs.rs/duckduckgo/latest/duckduckgo/params/enum.Region.html>
+///
+/// `https://duckduckgo.com/ac/?kl=uk-en&q=%s`
+pub static ref DDG_SUGG_API: BasicExternalApi =
+    BasicExternalApi {
+        scheme: Scheme::HTTPS,
+        domain: Authority::from_static("duckduckgo.com"),
+        path_start: "/ac/".to_owned(),
+        basic_headers: vec![
+            ("User-Agent".to_owned(), user_agent()),
+            // more to come...?
+        ],
+        basic_query: vec![
+            ("kl".to_string(), "uk-en".to_string()),
+        ],
+        rate: RateLimiter::new(1000), // Assume no real rate limit here
+        client: reqwest::Client::new(),
+    };
 
 /// API for searching for movies, TV shows, cast, and crew
 ///

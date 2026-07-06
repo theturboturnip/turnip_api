@@ -14,7 +14,7 @@ pub struct Auth;
 pub enum SearchSuggestApi {
     Google,
     Kagi,
-    // DDG, ?
+    DuckDuckGo,
 }
 impl FromStr for SearchSuggestApi {
     type Err = turnip_api::ApiError;
@@ -23,16 +23,16 @@ impl FromStr for SearchSuggestApi {
         match s {
             "goog" => Ok(SearchSuggestApi::Google),
             "kagi" => Ok(SearchSuggestApi::Kagi),
-            // "ddg" => Ok(SearchSuggestApi::Ddg),
+            "ddg" => Ok(SearchSuggestApi::DuckDuckGo),
             _ => Err(turnip_api::ApiError::QueryMalformed),
         }
     }
 }
 
-pub struct PerSearch<T>([T; 2]);
+pub struct PerSearch<T>([T; 3]);
 impl<T> PerSearch<T> {
-    pub fn new(google: T, kagi: T) -> Self {
-        Self([google, kagi])
+    pub fn new(google: T, kagi: T, ddg: T) -> Self {
+        Self([google, kagi, ddg])
     }
     fn get(&self, tag: SearchSuggestApi) -> &T {
         &self.0[tag as u8 as usize]
@@ -126,8 +126,7 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Redirect to an actual search engine with a search term
-    /// TODO: if it's an outcome of a suggestion, send it somewhere else?
+    /// Redirect to an actual search engine with a search term, or if it's an outcome of a suggestion send it somewhere else.
     pub async fn search(
         &self,
         req: turnip_api::AuthedRequest<'_, Auth>,
@@ -136,10 +135,10 @@ impl<'a> Ctx<'a> {
             .get_authed(Auth)?
             .query_param("q")
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
-        let backing = req
+        let backend = req
             .get_authed(Auth)?
-            .query_param("backing")
-            .map_or(Ok(SearchSuggestApi::Kagi), |b| b.parse())?;
+            .query_param("backend")
+            .map_or(Ok(SearchSuggestApi::DuckDuckGo), |b| b.parse())?;
         // println!("Search Query {}", query);
 
         let (sugg_dst, sugg) = Self::untag(&query);
@@ -148,7 +147,7 @@ impl<'a> Ctx<'a> {
             SuggestionDst::Tmdb { media_type } => self.tmdb_search_url,
             // Wolfram Alpha is not bad at time zones
             SuggestionDst::Calc | SuggestionDst::Time => self.wolfram_search_url,
-            SuggestionDst::Search => *self.generic_search_urls.get(backing),
+            SuggestionDst::Search => *self.generic_search_urls.get(backend),
         }
         .to_string(sugg.as_ref());
 
@@ -165,10 +164,10 @@ impl<'a> Ctx<'a> {
             .get_authed(Auth)?
             .query_param("q")
             .ok_or(turnip_api::ApiError::QueryMalformed)?;
-        let backing = req
+        let backend = req
             .get_authed(Auth)?
-            .query_param("backing")
-            .map_or(Ok(SearchSuggestApi::Kagi), |b| b.parse())?;
+            .query_param("backend")
+            .map_or(Ok(SearchSuggestApi::DuckDuckGo), |b| b.parse())?;
         // println!("Suggest Query {}", query);
 
         let num_items_per_provider: usize = req
@@ -182,8 +181,10 @@ impl<'a> Ctx<'a> {
 
         let suggestions = self
             .suggs
-            .get_suggestions(&query, num_items_per_provider, backing)
+            .get_suggestions(&query, num_items_per_provider, backend)
             .await?;
+
+        log::debug!("Responding with suggestions {:?}", &suggestions);
 
         turnip_api::ApiResponse::r200_json(serde_json::Value::Array(vec![
             serde_json::Value::String(query.to_string()),
