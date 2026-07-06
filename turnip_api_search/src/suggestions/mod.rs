@@ -43,6 +43,7 @@ pub struct Suggester<'a> {
 impl<'a> Suggester<'a> {
     pub async fn update_currencies(&self) {
         if let Some(currency_api) = self.currency_api {
+            log::info!("Updating currencies...");
             let resp = currency_api
                 .make_get_request(
                     "/latest.json",
@@ -68,6 +69,8 @@ impl<'a> Suggester<'a> {
                     })
                 }
             };
+        } else {
+            log::info!("Requested currency update but no currency API");
         }
     }
 

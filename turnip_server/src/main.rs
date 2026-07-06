@@ -163,12 +163,11 @@ async fn main() -> Result<(), AnyError> {
 
                 loop {
                     interval.tick().await;
-                    log::info!("Updating currencies...");
                     search.suggs.update_currencies().await;
                 }
             });
         }
-        None => log::info!("No currency API..."),
+        None => log::info!("No search API..."),
     }
 
     // This address is localhost
