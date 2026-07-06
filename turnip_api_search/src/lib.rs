@@ -1,3 +1,4 @@
+use futures::FutureExt;
 use futures::{StreamExt, stream::FuturesOrdered};
 use jiff::{SignedDuration, ToSpan};
 use turnip_api::{ExtApiResponse, ExternalApi, log_external_err, swallow_as_external_err};
@@ -88,6 +89,14 @@ impl<'a> SuggestionDst<'a> {
             (SuggestionDst::Search, sugg)
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExternalApiTag {
+    Wikipedia,
+    Tmdb,
+    /// for firefox-style suggestions, which I think are OpenSearch-compatible? But I'm not 100% sure.
+    OpenSearchSuggestion,
 }
 
 pub enum SearchSuggestApi<'a> {
@@ -242,7 +251,7 @@ impl<'a> Ctx<'a> {
                 //     &[],
                 // ));
 
-                external_future_tags.push('w');
+                external_future_tags.push(ExternalApiTag::Wikipedia);
             }
 
             if let Some(tmdb) = self.tmdb_api {
@@ -252,7 +261,7 @@ impl<'a> Ctx<'a> {
                     None,
                     &[("accept", "application/json")],
                 ));
-                external_future_tags.push('t');
+                external_future_tags.push(ExternalApiTag::Tmdb);
             }
         }
 
@@ -265,7 +274,7 @@ impl<'a> Ctx<'a> {
                     &[],
                 ));
                 // firefox-style suggestion format
-                external_future_tags.push('k');
+                external_future_tags.push(ExternalApiTag::OpenSearchSuggestion);
             }
             Some(SearchSuggestApi::Kagi(sugg)) => {
                 external_futures.push_back(sugg.make_get_request(
@@ -275,7 +284,7 @@ impl<'a> Ctx<'a> {
                     &[],
                 ));
                 // firefox-style suggestion format
-                external_future_tags.push('k');
+                external_future_tags.push(ExternalApiTag::OpenSearchSuggestion);
             }
             None => todo!(),
         }
@@ -287,7 +296,7 @@ impl<'a> Ctx<'a> {
             .zip(external_results.into_iter())
         {
             match (tag, result) {
-                ('w', Ok(wiki_json)) if wiki_json.status().is_success() => {
+                (ExternalApiTag::Wikipedia, Ok(wiki_json)) if wiki_json.status().is_success() => {
                     // https://stackoverflow.com/a/27458013
                     serde_json::from_slice(wiki_json.body()).map_or_else(
                         swallow_as_external_err!("Failed to parse Wikipedia JSON"),
@@ -313,7 +322,7 @@ impl<'a> Ctx<'a> {
                         },
                     );
                 }
-                ('t', Ok(tmdb_json)) if tmdb_json.status().is_success() => {
+                (ExternalApiTag::Tmdb, Ok(tmdb_json)) if tmdb_json.status().is_success() => {
                     serde_json::from_slice(tmdb_json.body()).map_or_else(
                         swallow_as_external_err!("Failed to parse TMDB JSON"),
                         |tmdb_json: serde_json::Value| {
@@ -352,7 +361,9 @@ impl<'a> Ctx<'a> {
                         },
                     );
                 }
-                ('k', Ok(sugg_json)) if sugg_json.status().is_success() => {
+                (ExternalApiTag::OpenSearchSuggestion, Ok(sugg_json))
+                    if sugg_json.status().is_success() =>
+                {
                     serde_json::from_slice(sugg_json.body()).map_or_else(
                         swallow_as_external_err!("Failed to parse generic suggestion JSON"),
                         |sugg_json: serde_json::Value| {
@@ -377,7 +388,7 @@ impl<'a> Ctx<'a> {
                 }
                 (c, Ok(json)) => {
                     log::info!(
-                        "Got fine response of kind {} back, status {}, left unhandled",
+                        "Got fine response of kind {:?} back, status {}, left unhandled",
                         c,
                         json.status()
                     )
