@@ -571,6 +571,22 @@ fn test_parse_value() {
         assert_eq_f("5.4321", 5.4321);
         assert_eq_f("1_000_005.4321", 1000005.4321);
 
+        // If the prefix is too large, precision will be dropped and the float will still parse
+        assert_eq!(
+            parse_value(
+                "1_000_00000000000000000000000000000000005.4321237846239843297923874293498327498237"
+            )
+            .map(|(_, v)| matches!(v, Value::Number(f) if f >= 1_000_00000000000000000000000000000000005.0)
+            ),
+            Ok(true)
+        );
+        // If the suffix is too large, precision will be dropped but the float will still be valid
+        assert_eq!(
+            parse_value("1_000_005.4321237846239843297923874293498327498237")
+                .map(|(_, v)| matches!(v, Value::Number(f) if f > 1000005.4 && f < 1000005.5)),
+            Ok(true)
+        );
+
         // Hex and binary don't work - this is sad,
         assert_eq!(
             parse_value("0xabCDeF12"),
@@ -630,13 +646,17 @@ pub fn parse_conversion(query: &str) -> Option<(Value, &str, &str)> {
 
     let (i_val, i_unit) = {
         match parse_i(i) {
-            Ok((i_val, i_unit)) => (i_val, i_unit),
+            Ok((i_val, i_unit)) => (i_val, i_unit.trim()),
             Err(e) => {
                 log::debug!("Near miss parsing conversion: {}", e);
                 return None;
             }
         }
     };
+
+    if i_unit.is_empty() {
+        return None;
+    }
 
     let o_unit = {
         if o.is_empty() {
@@ -646,4 +666,281 @@ pub fn parse_conversion(query: &str) -> Option<(Value, &str, &str)> {
     };
 
     Some((i_val, i_unit, o_unit))
+}
+
+#[test]
+fn test_parse_conversion() {
+    // Assert the given value string parses in all possible input-unit output-unit order configurations
+    let assert_eq_v = |str, v: Value| {
+        {
+            // prefix unit with space
+            let test_str = format!("thimble bucks {} in bimble ducks", str);
+            assert_eq!(
+                parse_conversion(&test_str),
+                Some((v, "thimble bucks", "bimble ducks")),
+                "Parsing '{}'",
+                test_str,
+            )
+        }
+        {
+            // prefix unit without space
+            let test_str = format!("thimble bucks{} in bimble ducks", str);
+            assert_eq!(
+                parse_conversion(&test_str),
+                Some((v, "thimble bucks", "bimble ducks")),
+                "Parsing '{}'",
+                test_str,
+            )
+        }
+        {
+            // prefix unit with no space before "in" should fail
+            let test_str = format!("thimble bucks{}in bimble ducks", str);
+            assert_eq!(parse_conversion(&test_str), None, "Parsing '{}'", test_str,)
+        }
+        {
+            // suffix unit with space
+            let test_str = format!("{} thimble bucks in bimble ducks", str);
+            assert_eq!(
+                parse_conversion(&test_str),
+                Some((v, "thimble bucks", "bimble ducks")),
+                "Parsing '{}'",
+                test_str,
+            )
+        }
+        {
+            // suffix unit without space
+            let test_str = format!("{}thimble bucks in bimble ducks", str);
+            assert_eq!(
+                parse_conversion(&test_str),
+                Some((v, "thimble bucks", "bimble ducks")),
+                "Parsing '{}'",
+                test_str,
+            )
+        }
+    };
+    // Assert the given value string partially parses, producing a non-whitespace suffix, in all possible input-unit output-unit order configurations
+    let assert_eq_v_suffix = |str: &str, suffix: &str, v: Value| {
+        {
+            // prefix unit with space
+            // This will produce None because the input unit prefix conflicts with the suffix
+            let test_str = format!("thimble bucks {} in bimble ducks", str);
+            assert_eq!(parse_conversion(&test_str), None, "Parsing '{}'", test_str,)
+        }
+        {
+            // prefix unit without space
+            // This will produce None because the input unit prefix conflicts with the suffix
+            let test_str = format!("thimble bucks{} in bimble ducks", str);
+            assert_eq!(parse_conversion(&test_str), None, "Parsing '{}'", test_str,)
+        }
+        {
+            // prefix unit with no space before "in" should fail
+            let test_str = format!("thimble bucks{}in bimble ducks", str);
+            if suffix.ends_with(" ") {
+                // This will produce None because the input unit prefix conflicts with the rest of the suffix
+                assert_eq!(parse_conversion(&test_str), None, "Parsing '{}'", test_str,)
+            } else {
+                // This will produce None because the input unit prefix conflicts with the rest of the suffix
+                assert_eq!(parse_conversion(&test_str), None, "Parsing '{}'", test_str,)
+            }
+        }
+        {
+            // suffix unit with space
+            // the suffix unit will combine with the other suffix
+            let test_str = format!("{} thimble bucks in bimble ducks", str);
+            let new_suffix = format!("{} thimble bucks", suffix);
+            assert_eq!(
+                parse_conversion(&test_str),
+                Some((v, new_suffix.trim(), "bimble ducks")),
+                "Parsing '{}'",
+                test_str,
+            )
+        }
+        {
+            // suffix unit without space
+            // the suffix unit will combine with the other suffix
+            let test_str = format!("{}thimble bucks in bimble ducks", str);
+            let new_suffix = format!("{}thimble bucks", suffix);
+            assert_eq!(
+                parse_conversion(&test_str),
+                Some((v, new_suffix.trim(), "bimble ducks")),
+                "Parsing '{}'",
+                test_str,
+            )
+        }
+    };
+    let assert_eq_t = |str, t: (i8, i8, TimeRender)| assert_eq_v(str, Value::Time(t.into(), None));
+    let assert_eq_dt = |str, d: (i16, i8, i8), t: (i8, i8, TimeRender)| {
+        assert_eq_v(str, Value::Time(t.into(), Some(d.into())))
+    };
+    let assert_eq_f = |str, f| assert_eq_v(str, Value::Number(f));
+    let assert_fail = |str| assert_eq!(parse_conversion(str), None, "Parsing '{}'", str);
+
+    use TimeRender::*;
+
+    // Date-then-time
+    {
+        assert_eq_dt("2026-01-01 12:59am", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("2026-1-01 12:59am", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("2026 12/13 12:59am", (2026, 12, 13), (00, 59, AmPm));
+        assert_eq_dt("2026_10_10 12:59am", (2026, 10, 10), (00, 59, AmPm));
+        // TODO need to figure out how to handle this
+        assert_eq_dt("2026 25 25 99:70am", (2026, 25, 25), (99, 70, AmPm));
+        // If someone forgets one of the parts, what happens?
+        assert_eq_v_suffix("2026 25 99:70am", ":70am", Value::Number(20262599.0));
+    }
+
+    // Time-then-date
+    {
+        assert_eq_dt("12:59am 2026-01-01", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("12:59am 2026-1-01", (2026, 1, 1), (00, 59, AmPm));
+        assert_eq_dt("12:59am 2026 12/13", (2026, 12, 13), (00, 59, AmPm));
+        assert_eq_dt("12:59am 2026_10_10", (2026, 10, 10), (00, 59, AmPm));
+        // TODO need to figure out how to handle this
+        assert_eq_dt("99:70am 2026 25 25", (2026, 25, 25), (99, 70, AmPm));
+        // If someone forgets one of the parts, what happens?
+        assert_eq_v_suffix(
+            "99:70am 2026 25",
+            " 2026 25",
+            Value::Time(
+                Time {
+                    h: 99,
+                    m: 70,
+                    render: AmPm,
+                },
+                None,
+            ),
+        );
+    }
+
+    // Time
+    {
+        // Plain hours without AM/PM should become numbers
+        assert_eq_f("05", 5.0);
+        assert_eq_f("5", 5.0);
+
+        // Test plain hours in the AM
+        assert_eq_t("05am", (5, 00, AmPm));
+        assert_eq_t("5am", (5, 00, AmPm));
+        assert_eq_t("05 am", (5, 00, AmPm));
+        assert_eq_t("5 am", (5, 00, AmPm));
+
+        // Test plain hours in the PM
+        assert_eq_t("05pm", (17, 00, AmPm));
+        assert_eq_t("5pm", (17, 00, AmPm));
+        assert_eq_t("05 pm", (17, 00, AmPm));
+        assert_eq_t("5 pm", (17, 00, AmPm));
+
+        // AM plain hour wrapping - 12am = midnight, past that is wrong and just take 13
+        assert_eq_t("10am", (10, 00, AmPm));
+        assert_eq_t("11am", (11, 00, AmPm));
+        assert_eq_t("12am", (0, 00, AmPm));
+        assert_eq_t("13am", (13, 00, AmPm)); // Degenerate case
+
+        // PM plain hour wrapping - 12pm = midday, past that is wrong and just take 13
+        assert_eq_t("10pm", (22, 00, AmPm));
+        assert_eq_t("11pm", (23, 00, AmPm));
+        assert_eq_t("12pm", (12, 00, AmPm));
+        assert_eq_t("13pm", (13, 00, AmPm)); // Degenerate case
+
+        // Hour-minute pairs work without AM/PM
+        assert_eq_t("05:38", (5, 38, Military));
+        assert_eq_t("5:38", (5, 38, Military));
+        assert_eq_t("17:38", (17, 38, Military));
+
+        // Test hour-minute pairs in the AM
+        assert_eq_t("05:38am", (5, 38, AmPm));
+        assert_eq_t("5:38am", (5, 38, AmPm));
+        assert_eq_t("17:38am", (17, 38, AmPm)); // Degenerate case
+        assert_eq_t("05:38 am", (5, 38, AmPm));
+        assert_eq_t("5:38 am", (5, 38, AmPm));
+        assert_eq_t("17:38 am", (17, 38, AmPm)); // Degenerate case
+
+        // Test hour-minute pairs in the PM
+        assert_eq_t("05:38pm", (17, 38, AmPm));
+        assert_eq_t("5:38pm", (17, 38, AmPm));
+        assert_eq_t("17:38pm", (17, 38, AmPm)); // Degenerate case
+        assert_eq_t("05:38 pm", (17, 38, AmPm));
+        assert_eq_t("5:38 pm", (17, 38, AmPm));
+        assert_eq_t("17:38 pm", (17, 38, AmPm)); // Degenerate case
+
+        // AM hour-minute wrapping - 12am = midnight, hours beyond that are wrong and just take 13
+        assert_eq_t("11:58am", (11, 58, AmPm));
+        assert_eq_t("11:59am", (11, 59, AmPm));
+        assert_eq_t("12:00am", (0, 00, AmPm));
+        assert_eq_t("12:01am", (0, 1, AmPm));
+        assert_eq_t("12:59am", (0, 59, AmPm));
+        assert_eq_t("13:00am", (13, 00, AmPm)); // Degenerate case
+
+        // PM plain hour wrapping - 12pm = midday, past that is wrong and just take 13
+        assert_eq_t("11:58pm", (23, 58, AmPm));
+        assert_eq_t("11:59pm", (23, 59, AmPm));
+        assert_eq_t("12:00pm", (12, 00, AmPm));
+        assert_eq_t("12:01pm", (12, 1, AmPm));
+        assert_eq_t("12:59pm", (12, 59, AmPm));
+        assert_eq_t("13:00pm", (13, 00, AmPm)); // Degenerate case
+
+        // TODO need to figure out how to handle this
+        assert_eq_t("26:39", (26, 39, Military));
+
+        // Minutes must be two-digit, otherwise they are parsed as values
+        assert_eq_v_suffix("1:1", ":1", Value::Number(1.0));
+        // Just text doesn't work, by design, too much ambiguity
+        assert_fail("One o'clock");
+    }
+
+    // Number
+    {
+        assert_eq_f("1000005", 1000005.0);
+        assert_eq_f("10,00,00,5", 1000005.0);
+        assert_eq_f("1,000,005", 1000005.0);
+        assert_eq_f("1_000_005", 1000005.0);
+        assert_eq_f("1_000 005", 1000005.0);
+        assert_eq_f("5", 5.0);
+
+        assert_eq_f("5.4321", 5.4321);
+        assert_eq_f("1_000_005.4321", 1000005.4321);
+
+        // If the prefix is too large, precision will be dropped and the float will still parse, just like the literal we use here
+        assert_eq_f(
+            "1_000_00000000000000000000000000000000005.4321237846239843297923874293498327498237",
+            1_000_00000000000000000000000000000000005.0,
+        );
+        // If the suffix is too large, precision will be dropped but the float will still be valid, just like the literal we use here
+        assert_eq_f(
+            "1_000_005.4321237846239843297923874293498327498237",
+            1_000_005.4321237846239843297923874293498327498237,
+        );
+
+        // Hex and binary don't work - this is sad,
+        assert_eq_v_suffix("0xabCDeF12", "xabCDeF12", Value::Number(0.0));
+        assert_eq_v_suffix("0b111011", "b111011", Value::Number(0.0));
+        // // Just text doesn't work, by design, too much ambiguity
+        // assert!(parse_value("One point 2").is_err());
+    }
+
+    // Dates on their own aren't parsed as dates, they're parsed as numbers and the rest is left off
+    assert_eq_v_suffix("2026-01-01", "-01-01", Value::Number(2026.0));
+    // // Not a valid date anyway, but may sometimes parse as a whole unit
+    // assert!(parse_value("December 2026").is_err());
+
+    // Edge case: what if a unit is missing?
+    assert_eq!(parse_conversion("4 in Y"), None);
+    // Make sure spaces don't count as a unit
+    assert_eq!(parse_conversion("4   in Y"), None);
+
+    // Edge case: what if the unit suffix is 'in'?
+    assert_eq!(
+        parse_conversion("4in in in"),
+        Some((Value::Number(4.0), "in", "in"))
+    );
+    // There is ambiguity here as to what units are what. This could be resolved in the future with better parsing?
+    assert_eq!(parse_conversion("4 in in in"), None);
+    // When the suffix unit isn't inches, the problem becomes clearer.
+    assert_eq!(parse_conversion("4in nautical miles"), None);
+    assert_eq!(parse_conversion("4 in nautical miles"), None);
+    assert_eq!(parse_conversion("4 in in nautical miles"), None);
+    assert_eq!(
+        parse_conversion("4 nautical miles in in"),
+        Some((Value::Number(4.0), "nautical miles", "in"))
+    );
 }
