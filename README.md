@@ -10,11 +10,11 @@ This API intends to provide basic web search functionality that uses search bar 
 For example, searching a movie title provides autocomplete suggestions that link directly to the Wikipedia or TMDB page, instead of leading the user to a search results page with a minefield of potential slop.
 Unit conversion is built in with strict-yet-permissive syntax "X Y in Z", and reliably triggers on known units, currencies, and timezones.
 
-- `GET /search?q=<QUERY>`
+- `GET /search?backing=<kagi|goog DEFAULT kagi>&q=<QUERY>`
   - Redirects from the query to a page that can handle it using the HTTP code [302 Found](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/302)
   - By default, redirects to <https://kagi.com> search.
   - "special suggestions" (see below) are redirected to specific websites.
-- `GET /search/suggest?n=<int DEFAULT 3>&q=<QUERY>`
+- `GET /search/suggest?backing=<kagi|goog DEFAULT kagi>&n=<int DEFAULT 3>&q=<QUERY>`
   - Generates search suggestions to be displayed inside the search bar.
     - Returns suggestions by the Firefox schema: a JSON array `["Original Query", ["Suggestion 1", "Suggestion 2"...]]`
     - Suggestions are layered, and "special suggestions" are prefixed with "~\<ZWJ\>" and a tag that indicates where they should be redirected.
@@ -32,7 +32,7 @@ Unit conversion is built in with strict-yet-permissive syntax "X Y in Z", and re
       - Up to `n` results from each site will be returned, each prefixed with "~wiki" or "~tmdb" as appropriate.
       - TODO this is NOT provided when the query is a calculation, which may cause problems when trying to search for specific things formatted "X Y in Z"...
     - Generic suggestions pulled from a basic search suggestion API are returned at the end.
-      - These are backed by the Kagi suggestion API at <https://kagisuggest.com/api/autosuggest?q=QUERY>, but the server can be configured at boot-time to use another Firefox-style API like <https://suggestqueries.google.com/complete/search?client=firefox&q=QUERY>.
+      - These use the API selected by `backing`: Kagi <https://kagisuggest.com/api/autosuggest?q=QUERY>, or Google <https://suggestqueries.google.com/complete/search?client=firefox&q=QUERY>.
       - DuckDuckGo <https://duckduckgo.com/ac/?q=QUERY&kl=EN> uses a different style and is not yet supported.
     - All APIs pinged are rate limited, so I think this server will be a good client, but I'm not sure how it will behave under heavy load. Thankfully, it will not be under heavy load?
 

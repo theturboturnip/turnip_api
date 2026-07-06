@@ -1,14 +1,9 @@
-use std::sync::RwLock;
-
-use arrayvec::ArrayString;
-use fnv::FnvHashMap;
 use smol_str::StrExt;
-use turnip_api::util::DebugError;
-
-use crate::conversions::parser::Value;
+use std::sync::RwLock;
 
 mod currency;
 mod parser;
+use parser::Value;
 mod quantity;
 mod time;
 
@@ -23,14 +18,16 @@ pub struct ConversionCtx {
     time: time::TimeCtx,
     currency: RwLock<currency::CurrencyCtx>,
 }
-impl ConversionCtx {
-    pub fn new() -> Self {
+impl Default for ConversionCtx {
+    fn default() -> Self {
         Self {
             quantity: quantity::QuantityCtx::new(),
             time: time::TimeCtx::new(),
             currency: RwLock::new(currency::CurrencyCtx::default()),
         }
     }
+}
+impl ConversionCtx {
     pub fn currency_timestamp(&self) -> jiff::Timestamp {
         self.currency.read().unwrap().timestamp
     }

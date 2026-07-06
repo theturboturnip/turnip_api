@@ -139,6 +139,8 @@ fn user_agent() -> String {
     )
 }
 
+lazy_static::lazy_static! {
+
 /// Wikipedia search
 ///
 /// <https://www.mediawiki.org/wiki/API:Opensearch>
@@ -153,7 +155,7 @@ fn user_agent() -> String {
 /// &format=json         # 'jsonfm' prints the JSON in HTML for debugging.
 /// &profile=fuzzy-subphrases # Typo correction
 /// ```
-pub fn wikipedia_api() -> BasicExternalApi {
+pub static ref WIKIPEDIA_API: BasicExternalApi =
     BasicExternalApi {
         scheme: Scheme::HTTPS,
         domain: Authority::from_static("en.wikipedia.org"),
@@ -166,34 +168,13 @@ pub fn wikipedia_api() -> BasicExternalApi {
         basic_query: vec![],
         rate: RateLimiter::new(3), // Wikimedia limits at 200/min ~= 3/second
         client: reqwest::Client::new(),
-    }
-}
+    };
 
-/// e.g. <https://developer.themoviedb.org/docs/search-and-query-for-details>
-/// ```
-/// 'https://api.themoviedb.org/3/search/movie?query=Jack+Reacher'
-/// ```
-pub fn tmdb_api(access_token: String) -> BasicExternalApi {
-    BasicExternalApi {
-        scheme: Scheme::HTTPS,
-        domain: Authority::from_static("api.themoviedb.org"),
-        path_start: "".to_owned(),
-        basic_headers: vec![
-            ("User-Agent".to_owned(), user_agent()),
-            (
-                "Authorization".to_owned(),
-                format!("Bearer {}", access_token),
-            ),
-            // more to come...?
-        ],
-        basic_query: vec![],
-        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
-        client: reqwest::Client::new(),
-    }
-}
 
-pub fn google_sugg_api() -> BasicExternalApi {
-    // http://suggestqueries.google.com/complete/search?output=firefox&q=BLAH
+/// OpenSearch-style suggestions from the Google autosuggestion API.
+///
+/// `http://suggestqueries.google.com/complete/search?output=firefox&q=%s`
+pub static ref GOOGLE_SUGG_API: BasicExternalApi =
     BasicExternalApi {
         scheme: Scheme::HTTPS,
         domain: Authority::from_static("suggestqueries.google.com"),
@@ -205,11 +186,12 @@ pub fn google_sugg_api() -> BasicExternalApi {
         basic_query: vec![],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
         client: reqwest::Client::new(),
-    }
-}
+    };
 
-pub fn kagi_sugg_api() -> BasicExternalApi {
-    // https://kagisuggest.com/api/autosuggest?q=%s
+/// OpenSearch-style suggestions from the Kagi autosuggestion API.
+///
+/// `https://kagisuggest.com/api/autosuggest?q=%s`
+pub static ref KAGI_SUGG_API: BasicExternalApi =
     BasicExternalApi {
         scheme: Scheme::HTTPS,
         domain: Authority::from_static("kagisuggest.com"),
@@ -221,7 +203,50 @@ pub fn kagi_sugg_api() -> BasicExternalApi {
         basic_query: vec![],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
         client: reqwest::Client::new(),
-    }
+    };
+
+// TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=en&q=
+// but handles things differently to Kagi!
+
+/// API for searching for movies, TV shows, cast, and crew
+///
+/// e.g. <https://developer.themoviedb.org/docs/search-and-query-for-details>
+///
+/// `https://api.themoviedb.org/3/search/movie?query=Jack+Reacher`
+pub static ref TMDB_API: Option<BasicExternalApi> = std::env::var("TMDB_KEY")
+    .map(|access_token| BasicExternalApi {
+        scheme: Scheme::HTTPS,
+        domain: Authority::from_static("api.themoviedb.org"),
+        path_start: "".to_owned(),
+        basic_headers: vec![
+            ("User-Agent".to_owned(), user_agent()),
+            (
+                "Authorization".to_owned(),
+                format!("Bearer {}", access_token.to_owned()),
+            ),
+            // more to come...?
+        ],
+        basic_query: vec![],
+        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        client: reqwest::Client::new(),
+    }).ok();
+
+/// API for retrieving currency exchange rates.
+/// Only exists when the OPEN_EXCHANGE_RATES_KEY is provided at runtime
+pub static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = std::env::var("OPEN_EXCHANGE_RATES_KEY")
+    .map(|api_key| BasicExternalApi {
+        scheme: Scheme::HTTPS,
+        domain: Authority::from_static("openexchangerates.org"),
+        path_start: "/api".to_owned(),
+        basic_headers: vec![],
+        basic_query: vec![
+            ("app_id".to_owned(), api_key.to_owned()),
+            // more to come...?
+        ],
+        rate: RateLimiter::new(100), // One hundred requests/second - should never get there
+        client: reqwest::Client::new(),
+    }).ok();
+
 }
 
 /// Maybe this works, maybe it doesn't. it's a basic example.
@@ -238,22 +263,6 @@ pub fn youtube_api(api_key: String) -> BasicExternalApi {
         ],
         basic_query: vec![],
         rate: RateLimiter::new(100), // One hundred requests/second
-        client: reqwest::Client::new(),
-    }
-}
-
-/// Maybe this works, maybe it doesn't. it's a basic example.
-pub fn open_currency_api(api_key: String) -> BasicExternalApi {
-    BasicExternalApi {
-        scheme: Scheme::HTTPS,
-        domain: Authority::from_static("openexchangerates.org"),
-        path_start: "/api".to_owned(),
-        basic_headers: vec![],
-        basic_query: vec![
-            ("app_id".to_owned(), api_key),
-            // more to come...?
-        ],
-        rate: RateLimiter::new(100), // One hundred requests/second - should never get there
         client: reqwest::Client::new(),
     }
 }

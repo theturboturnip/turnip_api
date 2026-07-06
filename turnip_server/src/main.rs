@@ -8,6 +8,7 @@ use hyper::{Method, Request};
 use hyper_util::rt::tokio::TokioIo;
 use lazy_static;
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use turnip_api::placeholder_url::{PlaceholderEncoding, PlaceholderUrl};
@@ -111,37 +112,36 @@ async fn handle(
     }
 }
 lazy_static::lazy_static! {
-    static ref GOOGLE_SUGG_API: BasicExternalApi = ext_api::google_sugg_api();
-    static ref KAGI_SUGG_API: BasicExternalApi = ext_api::kagi_sugg_api();
-    // TODO ddg autosuggest API?     // https://duckduckgo.com/ac/?kl=en&q=
-    // but handles things differently to Kagi!
-
-    static ref WIKIPEDIA_API: BasicExternalApi = ext_api::wikipedia_api();
-
-    static ref TMDB_API: Option<BasicExternalApi> = std::env::var("TMDB_KEY").map(|key| ext_api::tmdb_api(key.to_owned())).ok();
-
-    static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = std::env::var("OPEN_EXCHANGE_RATES_KEY").map(|key| ext_api::open_currency_api(key.to_owned())).ok();
-
     static ref ctx: ServerCtx<'static> = ServerCtx {
         ctx_weather: None,
         ctx_looper: None, // TODO
         ctx_search: Some(turnip_api_search::Ctx {
-            search_url: PlaceholderUrl { prefix: "https://kagi.com/search?q=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
+            generic_search_urls: turnip_api_search::PerSearch::new(
+                PlaceholderUrl::from_url_prefix("https://google.com/search?q="),
+                PlaceholderUrl::from_url_prefix("https://kagi.com/search?q="),
+            ),
+            wikipedia_search_url:
+                PlaceholderUrl::from_url_prefix("https://en.wikipedia.org/w/index.php?search="),
+            tmdb_search_url:
+                PlaceholderUrl::from_url_prefix("https://www.themoviedb.org/search?query="),
+            wolfram_search_url:
+                PlaceholderUrl::from_url_prefix("https://www.wolframalpha.com/input/?i="),
 
-            // generic_suggest_api: Some(turnip_api_search::SearchSuggestApi::Google(&*GOOGLE_SUGG_API)),
-            generic_suggest_api: Some(turnip_api_search::SearchSuggestApi::Kagi(&*KAGI_SUGG_API)),
+            suggs: turnip_api_search::Suggester {
+                generic_suggestion_apis: turnip_api_search::PerSearch::new(
+                    ext_api::GOOGLE_SUGG_API.deref() as &'static dyn ExternalApi,
+                    ext_api::KAGI_SUGG_API.deref() as &'static dyn ExternalApi,
+                ),
 
-            wikipedia_search_url: PlaceholderUrl { prefix: "https://en.wikipedia.org/w/index.php?search=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
-            wikipedia_api: Some(&(*WIKIPEDIA_API)),
+                wikipedia_api:
+                    Some(ext_api::WIKIPEDIA_API.deref() as &'static dyn ExternalApi),
+                tmdb_api:
+                    ext_api::TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi),
+                currency_api:
+                    ext_api::OPEN_CURRENCY_API.as_ref().map(|x| x as &'static dyn ExternalApi),
 
-            tmdb_search_url: PlaceholderUrl { prefix: "https://www.themoviedb.org/search?query=", placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
-            tmdb_api: TMDB_API.as_ref().map(|x| x as &'static dyn ExternalApi),
-
-            wolfram_search_url: PlaceholderUrl { prefix: "https://www.wolframalpha.com/input/?i=",  placeholder_encoding: PlaceholderEncoding::Url, suffix: "" },
-
-            currency_api: OPEN_CURRENCY_API.as_ref().map(|x| x as &'static dyn ExternalApi),
-
-            convs: turnip_api_search::conversions::ConversionCtx::new(),
+                convs: Default::default(),
+            }
         }),
     };
 }
@@ -162,7 +162,7 @@ async fn main() -> Result<(), AnyError> {
                 loop {
                     interval.tick().await;
                     log::info!("Updating currencies...");
-                    search.update_currencies().await;
+                    search.suggs.update_currencies().await;
                 }
             });
         }

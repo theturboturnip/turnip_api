@@ -14,6 +14,14 @@ pub struct PlaceholderUrl<'a> {
 }
 
 impl<'a> PlaceholderUrl<'a> {
+    pub const fn from_url_prefix(prefix: &'a str) -> Self {
+        Self {
+            prefix,
+            placeholder_encoding: PlaceholderEncoding::Url,
+            suffix: "",
+        }
+    }
+
     pub fn build<'p, P: Into<&'p str>>(self, placeholder: P) -> PlaceholderPendingUrl<'a, 'p> {
         PlaceholderPendingUrl {
             prefix: self.prefix,

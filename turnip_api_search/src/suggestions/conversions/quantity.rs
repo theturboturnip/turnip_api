@@ -1,10 +1,9 @@
-use std::sync::RwLock;
-
-use arrayvec::{ArrayString, ArrayVec};
+use arrayvec::ArrayVec;
 use fnv::FnvHashMap;
 use smol_str::SmolStr;
+use std::sync::RwLock;
 
-use crate::conversions::{
+use super::{
     Conversion,
     currency::{CURRENCIES, CURRENCY_PREFIXES, CurrencyCtx, CurrencyStr},
 };
