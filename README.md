@@ -1,6 +1,6 @@
 # turnip_api
 
-This server handles all endpoints hosted at `https://api.theturboturnip.com/`.
+This repo holds Rust code for a server that handles all endpoints hosted at `https://api.theturboturnip.com/`.
 
 # Endpoints
 
@@ -21,7 +21,7 @@ Unit conversion is built in with strict-yet-permissive syntax "X Y in Z", and re
       - For example, a calculation "1pm EST in BST" may suggest "~time 1pm EDT in BST = 6pm BST", which when clicked and passed through the search endpoint will redirect to a WolframAlpha page for "1pm EDT in BST".
       - Note that EDT (Eastern Daylight Time) is returned instead of EST (Eastern Standard Time) - this is intended. Timezone conversions look up what abbreviated zones are _actually_ in use, based on a user-provided date e.g. "2026-04-04 1pm" or using the current date, and only returns those. If, on that day, all of America is in daylight-savings, EDT will be the only valid option.
     - First, a calculation layer parses the query as "X Y in Z" i.e. X value in Y unit converted to Z unit, and attempts to complete the conversion.
-      - X can be a positive integer or floating-point number - scientific notation not yet supported - and Y and Z are arbitrary strings.
+      - X can be a positive integer or floating-point number (scientific notation not yet supported), a time (am/pm/24hr), or a date/time pair (date YYYY-MM-DD can be on either side of the time). Y and Z are arbitrary strings trimmed for leading and trailing whitespace.
       - Y can also be a prefix for X instead of a suffix, which right now is only used to support certain currency signs $, £, etc.
       - Length, temperature, and time conversions are computed locally.
       - Timezone conversions are computed locally.
