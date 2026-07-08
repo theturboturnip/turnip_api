@@ -61,6 +61,8 @@ impl<'a> ServerCtx<'a> {
 
 async fn api_route(req: Request<hyper::body::Incoming>) -> Result<ApiResponse, ApiError> {
     match (req.method(), req.uri().path()) {
+        (&Method::GET, "/heartbeat") => ApiResponse::r200_empty(),
+
         // (&Method::GET, "/looper/search") => ctx.ctx_looper.search(ctx.auth_for_looper(req)),
         // (&Method::GET, "/looper/playlistItems") => ctx.ctx_looper.playlist_items(ctx.auth_for_looper(req)),
         // (&Method::GET, "/looper/channelDetails") => ctx.ctx_looper.channel_details(ctx.auth_for_looper(req)),
@@ -151,9 +153,11 @@ lazy_static::lazy_static! {
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
     pretty_env_logger::init();
+    log::info!("Logger is up...");
 
     // Make sure all the lazy-statics lazily statically initialize
     ctx.poke();
+    log::info!("lazy-statics are up...");
 
     // Bump the currencies
     match ctx.ctx_search.as_ref() {
@@ -170,7 +174,18 @@ async fn main() -> Result<(), AnyError> {
         None => log::info!("No search API..."),
     }
 
-    // Bind to localhost at a specific port
+    // Bind  to a specific address
+    let ip: std::net::Ipv4Addr = match std::env::var("TURNIP_SERVER_IP")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        Some(port) => port,
+        None => {
+            log::warn!("Port not specified or TURNIP_SERVER_IP env var not correctly set - defaulting to 127.0.0.1");
+            [127, 0, 0, 1].into()
+        }
+    };
+    // Bind at a specific port
     let port = match std::env::var("TURNIP_SERVER_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -181,7 +196,9 @@ async fn main() -> Result<(), AnyError> {
             3000
         }
     };
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from((ip, port));
+
+    log::info!("Binding to {}", addr);
 
     // Bind to the port and listen for incoming TCP connections
     let listener = TcpListener::bind(addr).await?;

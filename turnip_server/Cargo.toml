@@ -21,3 +21,6 @@ futures = "0.3.32"
 lazy_static = "1.5.0"
 form_urlencoded = "1.2.2"
 reqwest = "0.13.4"
+
+# I thought this would be necessary, but I'm more comfortable using the Dockerfile to link the timezone info in directly
+# jiff = { version = "0.2.18", features = ["tzdb-bundle-always"] }

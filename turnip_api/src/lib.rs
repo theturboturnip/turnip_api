@@ -58,6 +58,17 @@ impl<'a> ApiRequest<'a> {
 
 pub struct ApiResponse(pub hyper::Response<http_body_util::Full<Bytes>>);
 impl ApiResponse {
+    pub fn r200_empty() -> Result<Self, ApiError> {
+        let resp = hyper::Response::builder()
+            .status(200)
+            .header(hyper::header::CONTENT_TYPE, "application/json")
+            .body(http_body_util::Full::new(Bytes::new()))
+            .map_err(|e| {
+                log::error!("Failed to create empty response, error {}", e);
+                ApiError::InternalError
+            })?;
+        Ok(ApiResponse(resp))
+    }
     pub fn r200_json<T: serde::Serialize + std::fmt::Debug>(value: T) -> Result<Self, ApiError> {
         let json = serde_json::to_vec(&value).map_err(|e| {
             log::error!("Failed to serialize response {:?} error {}", &value, e);
