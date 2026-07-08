@@ -19,4 +19,4 @@ docker-build:
 #- /usr/share/zoneinfo:/usr/share/zoneinfo:ro
 
 docker-run:
-    sudo docker run -d -p 3000:3000 --mount type=bind,src=/etc/timezone,dst=/etc/timezone,ro --mount type=bind,src=/usr/share/zoneinfo,dst=/usr/share/zoneinfo,ro  turnip_server
+    sudo docker run -d -p 3000:3000 --mount type=bind,src=/etc/timezone,dst=/etc/timezone,ro --mount type=bind,src=/usr/share/zoneinfo,dst=/usr/share/zoneinfo,ro  --env-file ./.env turnip_server
