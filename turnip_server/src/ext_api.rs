@@ -232,6 +232,11 @@ pub static ref DDG_SUGG_API: BasicExternalApi =
 ///
 /// `https://api.themoviedb.org/3/search/movie?query=Jack+Reacher`
 pub static ref TMDB_API: Option<BasicExternalApi> = std::env::var("TMDB_KEY")
+    .ok()
+    .and_then(|key| match key.trim() {
+        "" => None,
+        trimmed => Some(trimmed.to_string())
+    })
     .map(|access_token| BasicExternalApi {
         scheme: Scheme::HTTPS,
         domain: Authority::from_static("api.themoviedb.org"),
@@ -247,11 +252,16 @@ pub static ref TMDB_API: Option<BasicExternalApi> = std::env::var("TMDB_KEY")
         basic_query: vec![],
         rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
         client: reqwest::Client::new(),
-    }).ok();
+    });
 
 /// API for retrieving currency exchange rates.
 /// Only exists when the OPEN_EXCHANGE_RATES_KEY is provided at runtime
 pub static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = std::env::var("OPEN_EXCHANGE_RATES_KEY")
+    .ok()
+    .and_then(|key| match key.trim() {
+        "" => None,
+        trimmed => Some(trimmed.to_string())
+    })
     .map(|api_key| BasicExternalApi {
         scheme: Scheme::HTTPS,
         domain: Authority::from_static("openexchangerates.org"),
@@ -263,7 +273,7 @@ pub static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = std::env::var("OPEN
         ],
         rate: RateLimiter::new(100), // One hundred requests/second - should never get there
         client: reqwest::Client::new(),
-    }).ok();
+    });
 
 }
 
