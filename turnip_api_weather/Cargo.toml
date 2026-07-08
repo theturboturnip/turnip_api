@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-turnip_api = { version = "0.1.0", path = "../turnip_api" }
+turnip_api = { path = "../turnip_api" }

@@ -1771,7 +1771,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "turnip_api"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "form_urlencoded",
  "http-body-util",
@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "turnip_api_search"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "arrayvec",
  "compact_str",
@@ -1817,7 +1817,7 @@ dependencies = [
 
 [[package]]
 name = "turnip_server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-rate-limiter",
  "form_urlencoded",

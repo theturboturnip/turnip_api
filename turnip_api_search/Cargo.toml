@@ -1,6 +1,6 @@
 [package]
 name = "turnip_api_search"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [lib]
@@ -17,4 +17,4 @@ nom = "8.0.0"
 numfmt = "1.2.0"
 serde_json = "1.0.150"
 smol_str = "0.3.6"
-turnip_api = { version = "0.1.0", path = "../turnip_api" }
+turnip_api = { path = "../turnip_api" }

@@ -1,6 +1,6 @@
 [package]
 name = "turnip_server"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]
@@ -11,9 +11,9 @@ log = "0.4.33"
 pretty_env_logger = "0.5.0"
 serde = "1.0.228"
 tokio = { version = "1", features = ["full"] }
-turnip_api = { version = "0.1.0", path = "../turnip_api" }
+turnip_api = { version = "1.0.0", path = "../turnip_api" }
 turnip_api_looper = { version = "0.1.0", path = "../turnip_api_looper" }
-turnip_api_search = { version = "0.1.0", path = "../turnip_api_search" }
+turnip_api_search = { version = "1.0.0", path = "../turnip_api_search" }
 turnip_api_weather = { version = "0.1.0", path = "../turnip_api_weather" }
 async-rate-limiter = { version = "1", features = ["rt-tokio"] }
 http = "1.4.2"
