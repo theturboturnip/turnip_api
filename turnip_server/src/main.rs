@@ -98,6 +98,7 @@ async fn handle(
                 ApiError::QueryTooLong => 414,
                 ApiError::InternalError => 500,
                 ApiError::ExternalApiError => 500,
+                ApiError::InternallyRateLimited => 503, // turn this into a "please stop sending"
             };
             let msg = format!("{}: {:?}", code, e);
             let resp = hyper::Response::builder()

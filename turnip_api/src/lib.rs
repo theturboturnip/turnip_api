@@ -19,6 +19,7 @@ pub enum ApiError {
     QueryTooLong,
     InternalError,
     ExternalApiError,
+    InternallyRateLimited,
 }
 
 /// A bare-minimum struct holding everything a turnip_api needs as sanitized input.

@@ -15,6 +15,7 @@ pub struct BasicExternalApi {
     basic_headers: Vec<(String, String)>,
     basic_query: Vec<(String, String)>,
     rate: RateLimiter,
+    wait_for_rate: bool,
     client: reqwest::Client,
 }
 impl BasicExternalApi {
@@ -82,13 +83,9 @@ impl BasicExternalApi {
         &self,
         req: reqwest::Request,
     ) -> Result<turnip_api::ExtApiResponse, AnyError> {
-        // We've done as much work as we can up front, now wait for permission
-        self.rate.acquire().await;
-
         let res = self.client.execute(req).await?;
         let status = res.status();
         let body = res.bytes().await?;
-        // println!("got response {} {}", status, String::from_utf8_lossy(&body));
 
         log::debug!("Got response {} {}", status, String::from_utf8_lossy(&body));
 
@@ -123,6 +120,14 @@ impl turnip_api::ExternalApi for BasicExternalApi {
         log::debug!("Requesting {:?}", &req);
 
         async move {
+            if self.wait_for_rate {
+                // We've done as much work as we can up front, now wait for permission
+                self.rate.acquire().await;
+            } else {
+                self.rate
+                    .try_acquire()
+                    .map_err(|_| turnip_api::ApiError::InternallyRateLimited)?;
+            }
             self.internal_get_request(req)
                 .await
                 .map_err(consume_as_external_err!(
@@ -139,6 +144,12 @@ fn user_agent() -> String {
         "turnip_server/{} (theturboturnip.com, me@theturboturnip.com)",
         env!("CARGO_PKG_VERSION")
     )
+}
+
+fn rate_limiter_rate_burst(rate: usize, burst: usize) -> RateLimiter {
+    let x = RateLimiter::new(rate);
+    x.burst(burst);
+    x
 }
 
 lazy_static::lazy_static! {
@@ -168,7 +179,11 @@ pub static ref WIKIPEDIA_API: BasicExternalApi =
             // more to come...?
         ],
         basic_query: vec![],
-        rate: RateLimiter::new(3), // Wikimedia limits at 200/min ~= 3/second
+        // TODO dual bucket system?
+        rate: rate_limiter_rate_burst(3, 20), // Wikimedia limits at 200/min ~= 3/second total. Assume ~1 search every 6 seconds => allow a theoretical single search to use 1/10th of the minute-limit in a burst.
+        // if we exceed our burst, just skip using Wikipedia as a recommendation source. the user just needs to wait 1/3rd of a second to get a token back.
+        // Wikipedia rate limits are applied at the level of minutes so this should be ok.
+        wait_for_rate: false,
         client: reqwest::Client::new(),
     };
 
@@ -186,7 +201,8 @@ pub static ref GOOGLE_SUGG_API: BasicExternalApi =
             // more to come...?
         ],
         basic_query: vec![],
-        rate: RateLimiter::new(1000), // Assume no real rate limit here
+        rate: RateLimiter::new(10000), // Assume no real rate limit here
+        wait_for_rate: true,
         client: reqwest::Client::new(),
     };
 
@@ -203,7 +219,8 @@ pub static ref KAGI_SUGG_API: BasicExternalApi =
             // more to come...?
         ],
         basic_query: vec![],
-        rate: RateLimiter::new(1000), // Assume no real rate limit here
+        rate: RateLimiter::new(10000), // Assume no real rate limit here
+        wait_for_rate: true,
         client: reqwest::Client::new(),
     };
 
@@ -224,7 +241,8 @@ pub static ref DDG_SUGG_API: BasicExternalApi =
         basic_query: vec![
             ("kl".to_string(), "uk-en".to_string()),
         ],
-        rate: RateLimiter::new(1000), // Assume no real rate limit here
+        rate: RateLimiter::new(10000), // Assume no real rate limit here
+        wait_for_rate: true,
         client: reqwest::Client::new(),
     };
 
@@ -252,7 +270,9 @@ pub static ref TMDB_API: Option<BasicExternalApi> = std::env::var("TMDB_KEY")
             // more to come...?
         ],
         basic_query: vec![],
-        rate: RateLimiter::new(20), // Twenty requests/second, right now I think they cap at 40?
+        // https://developer.themoviedb.org/docs/rate-limiting
+        rate: RateLimiter::new(35), // Twenty requests/second, right now I think they cap at 40?
+        wait_for_rate: false,
         client: reqwest::Client::new(),
     });
 
@@ -274,6 +294,7 @@ pub static ref OPEN_CURRENCY_API: Option<BasicExternalApi> = std::env::var("OPEN
             // more to come...?
         ],
         rate: RateLimiter::new(100), // One hundred requests/second - should never get there
+        wait_for_rate: true, // Just wait it out, currency requests are not latency sensitive
         client: reqwest::Client::new(),
     });
 
@@ -293,6 +314,7 @@ pub fn youtube_api(api_key: String) -> BasicExternalApi {
         ],
         basic_query: vec![],
         rate: RateLimiter::new(100), // One hundred requests/second
+        wait_for_rate: true,         // these are important probably, come back to this later.
         client: reqwest::Client::new(),
     }
 }
