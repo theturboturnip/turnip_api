@@ -175,9 +175,6 @@ impl<'a> Ctx<'a> {
             .query_param("n")
             .and_then(|n| n.parse().ok())
             .unwrap_or(3);
-        if num_items_per_provider > 10 {
-            return Err(turnip_api::ApiError::QueryMalformed);
-        }
 
         let suggestions = self
             .suggs

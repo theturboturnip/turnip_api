@@ -71,6 +71,10 @@ impl<'a> Suggester<'a> {
         num_items_per_provider: usize,
         backend: SearchSuggestApi,
     ) -> Result<Vec<(SuggestionDst, String)>, turnip_api::ApiError> {
+        if num_items_per_provider > 10 {
+            return Err(turnip_api::ApiError::QueryMalformed);
+        }
+
         let mut suggestions = vec![];
         if let Some(convs) = self.convs.parse_and_convert(query.as_ref()) {
             suggestions.extend(convs.into_iter().map(|conv| match conv {
@@ -103,12 +107,22 @@ impl<'a> Suggester<'a> {
             }
 
             let external_results: Vec<Result<_, _>> = external_futures.collect().await;
+            let search_suggest_i = external_results.len() - 1;
 
             suggestions.extend(
                 external_results
                     .into_iter()
-                    .filter_map(|r| r.ok())
-                    .map(|v| v.into_iter().take(num_items_per_provider))
+                    .enumerate()
+                    .filter_map(|(i, r)| r.map(|o| (i, o)).ok())
+                    .map(|(i, v)| {
+                        v.into_iter().take(if i == search_suggest_i {
+                            // If these are the search suggestions, take as many was we can
+                            20
+                        } else {
+                            // Otherwise cut them down
+                            num_items_per_provider
+                        })
+                    })
                     .flatten(),
             );
         }
