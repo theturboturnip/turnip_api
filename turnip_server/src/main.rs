@@ -148,7 +148,7 @@ lazy_static::lazy_static! {
 
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
-    pretty_env_logger::init();
+    pretty_env_logger::init_timed();
     log::info!("Logger is up...");
 
     // Make sure all the lazy-statics lazily statically initialize

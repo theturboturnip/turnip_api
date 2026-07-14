@@ -1,6 +1,7 @@
 use std::pin::Pin;
 
 use async_rate_limiter::RateLimiter;
+use futures::FutureExt;
 use http::uri::{Authority, Scheme};
 use hyper::Uri;
 use turnip_api::consume_as_external_err;
@@ -121,14 +122,15 @@ impl turnip_api::ExternalApi for BasicExternalApi {
 
         log::debug!("Requesting {:?}", &req);
 
-        Box::pin(async move {
+        async move {
             self.internal_get_request(req)
                 .await
                 .map_err(consume_as_external_err!(
                     "error evaluating get request for {}",
                     url
                 ))
-        })
+        }
+        .boxed()
     }
 }
 

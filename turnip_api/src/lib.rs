@@ -145,6 +145,16 @@ macro_rules! consume_as_external_err {
 }
 
 #[macro_export]
+macro_rules! option_into_external_err {
+    ($($arg:tt)*) => {
+        || {
+            log::error!("ExternalApiError: {}", format!($($arg)*));
+            turnip_api::ApiError::ExternalApiError
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! swallow_as_external_err {
     ($($arg:tt)*) => {
         |e| {
