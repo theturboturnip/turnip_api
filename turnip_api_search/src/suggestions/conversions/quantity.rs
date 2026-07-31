@@ -98,6 +98,11 @@ mod tests {
                             .iter()
                             .position(|u| *u == *uo)
                             .unwrap()] = true;
+
+                        tested_out[<$t as VariantArray>::VARIANTS
+                            .iter()
+                            .position(|u| *u == *ui)
+                            .unwrap()] = true;
                     }
 
                     let untested_variants = tested_out
@@ -266,8 +271,11 @@ impl QuantityCtx {
 
         let o_val = match (input_unit, output_unit) {
             (Length(i), Length(o)) => basic_conv!(i, o),
+            (Area(i), Area(o)) => basic_conv!(i, o),
+            // (Volume(i), Volume(o)) => basic_conv!(i, o),
             (Temp(i), Temp(o)) => basic_conv!(i, o),
             (Time(i), Time(o)) => basic_conv!(i, o),
+            (Weight(i), Weight(o)) => basic_conv!(i, o),
             (Currency(i), Currency(o)) => currency.and_then(|state| {
                 // Only unlock the state when we actually need to read it
                 let state = state.read().unwrap();
