@@ -117,10 +117,7 @@ mod tests {
                         })
                         .collect::<Vec<_>>();
                     if untested_variants.len() > 0 {
-                        panic!(
-                            "TEST_CASES didn't test variants {:?} as conversion outputs",
-                            untested_variants
-                        );
+                        panic!("TEST_CASES didn't test variants {:?}", untested_variants);
                     }
                 }
             }
