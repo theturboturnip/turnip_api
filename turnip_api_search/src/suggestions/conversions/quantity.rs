@@ -88,11 +88,11 @@ mod tests {
                     for (ui, vi, uo, vo) in <$t as NumUnitGroup>::TEST_CASES {
                         let actual_vo = ctx.raw_convert($con(*ui), *vi, $con(*uo), None);
                         assert!(actual_vo.is_some());
-                        assert_relative_eq!(actual_vo.unwrap(), *vo, max_relative = 0.1);
+                        assert_relative_eq!(actual_vo.unwrap(), *vo, max_relative = 0.01);
 
                         let actual_vi = ctx.raw_convert($con(*uo), *vo, $con(*ui), None);
                         assert!(actual_vi.is_some());
-                        assert_relative_eq!(actual_vi.unwrap(), *vi, max_relative = 0.1);
+                        assert_relative_eq!(actual_vi.unwrap(), *vi, max_relative = 0.01);
 
                         tested_out[<$t as VariantArray>::VARIANTS
                             .iter()

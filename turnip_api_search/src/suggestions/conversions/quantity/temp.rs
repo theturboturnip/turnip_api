@@ -24,7 +24,7 @@ impl NumUnitGroup for TempUnit {
         (Self::K, 273.15, Self::C, 0.0),
         (Self::K, 273.14, Self::C, -0.01),
         (Self::K, 273.13, Self::C, -0.02),
-        (Self::F, 50.0, Self::K, 285.15),
+        (Self::F, 50.0, Self::K, 283.15),
     ];
 
     const STRS: &'static [(Self, Strs)] = &[
