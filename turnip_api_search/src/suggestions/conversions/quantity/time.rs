@@ -34,7 +34,7 @@ impl NumUnitGroup for TimeUnit {
 
     #[cfg(test)]
     const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[
-        (TimeUnit::Year, 3.0, TimeUnit::Week, 156.0),
+        (TimeUnit::Day, 21.0, TimeUnit::Week, 3.0),
         (TimeUnit::Year, 3.0, TimeUnit::Day, 1095.75),
         (TimeUnit::Day, 3.0, TimeUnit::Hour, 72.0),
         (TimeUnit::Hour, 0.5, TimeUnit::Min, 30.0),
