@@ -20,6 +20,13 @@ enum NumUnit {
     // ...
 }
 
+struct Strs {
+    name: &'static str,
+    suffix: &'static str,
+    /// mnemonics
+    mns: &'static [&'static str],
+}
+
 trait NumUnitGroup:
     std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash + 'static
 {
@@ -261,14 +268,14 @@ impl QuantityCtx {
         use NumUnit::*;
         use TempUnit::*;
         use TimeUnit::*;
-        let mut basic_unit_suffix = |unit, name: &str, suffix: &str, parsers: &[&str]| {
+        let mut basic_unit_suffix = |unit, s: Strs| {
             num_unit_to_name
                 .entry(unit)
-                .insert_entry(format!("{}", name));
+                .insert_entry(format!("{}", s.name));
             num_unit_to_suffix
                 .entry(unit)
-                .insert_entry(format!("{}", suffix));
-            for s in parsers {
+                .insert_entry(format!("{}", s.suffix));
+            for s in s.mns {
                 str_to_num_unit
                     .entry(NumberUnitStr::from(*s))
                     .or_insert_with(NumberUnits::new)
@@ -277,225 +284,329 @@ impl QuantityCtx {
         };
         basic_unit_suffix(
             Length(Km),
-            "kilometers",
-            "km",
-            &["kilometer", "kilometre", "kilometers", "kilometres", "km"],
+            Strs {
+                name: "kilometers",
+                suffix: "km",
+                mns: &["kilometer", "kilometre", "kilometers", "kilometres", "km"],
+            },
         );
         basic_unit_suffix(
             Length(M),
-            "meters",
-            "m",
-            &["meter", "metre", "meters", "metres", "m"],
+            Strs {
+                name: "meters",
+                suffix: "m",
+                mns: &["meter", "metre", "meters", "metres", "m"],
+            },
         );
         basic_unit_suffix(
             Length(Cm),
-            "centimeters",
-            "cm",
-            &[
-                "centimeter",
-                "centimetre",
-                "centimeters",
-                "centimetres",
-                "cm",
-            ],
+            Strs {
+                name: "centimeters",
+                suffix: "cm",
+                mns: &[
+                    "centimeter",
+                    "centimetre",
+                    "centimeters",
+                    "centimetres",
+                    "cm",
+                ],
+            },
         );
         basic_unit_suffix(
             Length(Mm),
-            "millimeters",
-            "mm",
-            &[
-                "millimeter",
-                "millimetre",
-                "millimeters",
-                "millimetres",
-                "mm",
-            ],
+            Strs {
+                name: "millimeters",
+                suffix: "mm",
+                mns: &[
+                    "millimeter",
+                    "millimetre",
+                    "millimeters",
+                    "millimetres",
+                    "mm",
+                ],
+            },
         );
         basic_unit_suffix(
             Length(Um),
-            "micrometers",
-            "μm",
-            &[
-                "micrometer",
-                "micrometre",
-                "micrometers",
-                "micrometres",
-                "um",
-                "μm",
-            ],
+            Strs {
+                name: "micrometers",
+                suffix: "μm",
+                mns: &[
+                    "micrometer",
+                    "micrometre",
+                    "micrometers",
+                    "micrometres",
+                    "um",
+                    "μm",
+                ],
+            },
         );
         basic_unit_suffix(
             Length(Nm),
-            "nanometers",
-            "nm",
-            &["nanometer", "nanometre", "nanometers", "nanometres", "nm"],
+            Strs {
+                name: "nanometers",
+                suffix: "nm",
+                mns: &["nanometer", "nanometre", "nanometers", "nanometres", "nm"],
+            },
         );
         basic_unit_suffix(
             Length(Pm),
-            "picometers",
-            "pm",
-            &["picometer", "picometre", "picometers", "picometres", "pm"],
+            Strs {
+                name: "picometers",
+                suffix: "pm",
+                mns: &["picometer", "picometre", "picometers", "picometres", "pm"],
+            },
         );
         basic_unit_suffix(
             Length(In),
-            "inches",
-            "in",
-            &["inch", "inches", "inchs", "in"],
+            Strs {
+                name: "inches",
+                suffix: "in",
+                mns: &["inch", "inches", "inchs", "in"],
+            },
         );
-        basic_unit_suffix(Length(Ft), "feet", "ft", &["foot", "feet", "ft"]);
+        basic_unit_suffix(
+            Length(Ft),
+            Strs {
+                name: "feet",
+                suffix: "ft",
+                mns: &["foot", "feet", "ft"],
+            },
+        );
         basic_unit_suffix(
             Length(FtIn),
-            "feet and inches",
-            "ft/in",
-            &["foot", "feet", "ft"],
+            Strs {
+                name: "feet and inches",
+                suffix: "ft/in",
+                mns: &["foot", "feet", "ft"],
+            },
         );
-        basic_unit_suffix(Length(Yd), "yds", " yards", &["yard", "yards", "yd", "yds"]);
-        basic_unit_suffix(Length(Mile), "miles", " miles", &["mile", "miles"]);
+        basic_unit_suffix(
+            Length(Yd),
+            Strs {
+                name: "yds",
+                suffix: " yards",
+                mns: &["yard", "yards", "yd", "yds"],
+            },
+        );
+        basic_unit_suffix(
+            Length(Mile),
+            Strs {
+                name: "miles",
+                suffix: " miles",
+                mns: &["mile", "miles"],
+            },
+        );
         basic_unit_suffix(
             Length(League),
-            "leagues",
-            " leagues",
-            &["league", "leagues"],
+            Strs {
+                name: "leagues",
+                suffix: " leagues",
+                mns: &["league", "leagues"],
+            },
         );
         basic_unit_suffix(
             Length(NauticalMile),
-            "nautical miles",
-            " nautical miles",
-            // If the user specifies the base, they may want this
-            &[
-                "mile",
-                "miles",
-                "nautical mile",
-                "nautical miles",
-                "nmi",
-                "nmis",
-            ],
+            Strs {
+                name: "nautical miles",
+                suffix: " nautical miles",
+                mns: &[
+                    "mile",
+                    "miles",
+                    "nautical mile",
+                    "nautical miles",
+                    "nmi",
+                    "nmis",
+                ],
+            },
         );
         basic_unit_suffix(
             Length(NauticalLeague),
-            "nautical leagues",
-            " nautical leagues",
-            // If the user specifies the base, they may want this
-            &["league", "leagues", "nautical league", "nautical leagues"],
+            Strs {
+                name: "nautical leagues",
+                suffix: " nautical leagues",
+                mns: &["league", "leagues", "nautical league", "nautical leagues"],
+            },
         );
         basic_unit_suffix(
             Length(Fathom),
-            "fathoms",
-            " fathoms",
-            &["fathom", "fathoms"],
+            Strs {
+                name: "fathoms",
+                suffix: " fathoms",
+                mns: &["fathom", "fathoms"],
+            },
         );
 
         basic_unit_suffix(
             Length(LightYear),
-            "light years",
-            "ly",
-            &[
-                "ly",
-                "lys",
-                "lyr",
-                "lyrs",
-                "light year",
-                "light-year",
-                "lightyear",
-                "light years",
-                "light-years",
-                "lightyears",
-            ],
+            Strs {
+                name: "light years",
+                suffix: "ly",
+                mns: &[
+                    "ly",
+                    "lys",
+                    "lyr",
+                    "lyrs",
+                    "light year",
+                    "light-year",
+                    "lightyear",
+                    "light years",
+                    "light-years",
+                    "lightyears",
+                ],
+            },
         );
         basic_unit_suffix(
             Length(Au),
-            "astronomical units",
-            "au",
-            &["au", "aus", "astronomical unit", "astronomical units"],
+            Strs {
+                name: "astronomical units",
+                suffix: "au",
+                mns: &["au", "aus", "astronomical unit", "astronomical units"],
+            },
         );
         basic_unit_suffix(
             Length(Parsec),
-            "parsecs",
-            "pc",
-            &["pc", "pcs", "parsec", "parsecs"],
+            Strs {
+                name: "parsecs",
+                suffix: "pc",
+                mns: &["pc", "pcs", "parsec", "parsecs"],
+            },
         );
         basic_unit_suffix(
             Length(Furlong),
-            "furlongs",
-            "fur",
-            &["fur", "furs", "furlong", "furlongs"],
+            Strs {
+                name: "furlongs",
+                suffix: "fur",
+                mns: &["fur", "furs", "furlong", "furlongs"],
+            },
         );
 
         basic_unit_suffix(
             Temp(C),
-            "°C", // degree sign prefix renders better than dedicated degrees-C
-            "°C",
-            &[
-                "celsius", //
-                "c",       //
-                "°c",      // degree sign prefix
-                "˚c",      // 'ring above' prefix, for permissivity
-                "∘c",      // 'ring operator' prefix, for permissivity
-                "℃",       // dedicated "degrees-C" character
-            ],
+            Strs {
+                name: "°C", // degree sign prefix renders better than dedicated degrees-C
+                suffix: "°C",
+                mns: &[
+                    "celsius", //
+                    "c",       //
+                    "°c",      // degree sign prefix
+                    "˚c",      // 'ring above' prefix, for permissivity
+                    "∘c",      // 'ring operator' prefix, for permissivity
+                    "℃",       // dedicated "degrees-C" character
+                ],
+            },
         );
         basic_unit_suffix(
             Temp(F),
-            "°F", // degree sign prefix renders better than dedicated degrees-F
-            "°F",
-            &[
-                "fahrenheit", //
-                "f",          //
-                "°f",         // degree sign prefix
-                "˚f",         // 'ring above' prefix, for permissivity
-                "∘f",         // 'ring operator' prefix, for permissivity
-                "℉",          // dedicated "degrees-F" character
-            ],
+            Strs {
+                name: "°F", // degree sign prefix renders better than dedicated degrees-F
+                suffix: "°F",
+                mns: &[
+                    "fahrenheit", //
+                    "f",          //
+                    "°f",         // degree sign prefix
+                    "˚f",         // 'ring above' prefix, for permissivity
+                    "∘f",         // 'ring operator' prefix, for permissivity
+                    "℉",          // dedicated "degrees-F" character
+                ],
+            },
         );
         basic_unit_suffix(
             Temp(K),
-            "kelvin",
-            "K",
-            &[
-                "kelvin", //
-                "k",      //
-                "°k",     // degree sign prefix
-                "˚k",     // 'ring above' prefix, for permissivity
-                "∘k",     // 'ring operator' prefix, for permissivity
-                          // there is no "degrees-K" character
-            ],
+            Strs {
+                name: "kelvin",
+                suffix: "K",
+                mns: &[
+                    "kelvin", //
+                    "k",      //
+                    "°k",     // degree sign prefix
+                    "˚k",     // 'ring above' prefix, for permissivity
+                    "∘k",     // 'ring operator' prefix, for permissivity
+                              // there is no "degrees-K" character
+                ],
+            },
         );
 
-        basic_unit_suffix(Time(S), "seconds", "s", &["s", "second", "seconds"]);
+        basic_unit_suffix(
+            Time(S),
+            Strs {
+                name: "seconds",
+                suffix: "s",
+                mns: &["s", "second", "seconds"],
+            },
+        );
         basic_unit_suffix(
             Time(Ms),
-            "milliseconds",
-            "ms",
-            &["ms", "millisecond", "milliseconds"],
+            Strs {
+                name: "milliseconds",
+                suffix: "ms",
+                mns: &["ms", "millisecond", "milliseconds"],
+            },
         );
         basic_unit_suffix(
             Time(Us),
-            "microseconds",
-            "μs",
-            &["μs", "microsecond", "microseconds"],
+            Strs {
+                name: "microseconds",
+                suffix: "μs",
+                mns: &["μs", "microsecond", "microseconds"],
+            },
         );
         basic_unit_suffix(
             Time(Ns),
-            "nanoseconds",
-            "ns",
-            &["ns", "nanosecond", "nanoseconds"],
+            Strs {
+                name: "nanoseconds",
+                suffix: "ns",
+                mns: &["ns", "nanosecond", "nanoseconds"],
+            },
         );
         basic_unit_suffix(
             Time(Ps),
-            "picoseconds",
-            "ps",
-            &["ps", "picosecond", "picoseconds"],
+            Strs {
+                name: "picoseconds",
+                suffix: "ps",
+                mns: &["ps", "picosecond", "picoseconds"],
+            },
         );
         basic_unit_suffix(
             Time(Min),
-            "minutes",
-            "mins",
-            &["min", "mins", "minute", "minutes"],
+            Strs {
+                name: "minutes",
+                suffix: "mins",
+                mns: &["min", "mins", "minute", "minutes"],
+            },
         );
-        basic_unit_suffix(Time(Hour), "hours", "hrs", &["hr", "hrs", "hour", "hours"]);
-        basic_unit_suffix(Time(Day), "days", " days", &["dy", "dys", "day", "days"]);
-        basic_unit_suffix(Time(Week), " weeks", "wks", &["wk", "wks", "week", "weeks"]);
-        basic_unit_suffix(Time(Year), " years", "yrs", &["yr", "yrs", "year", "years"]);
+        basic_unit_suffix(
+            Time(Hour),
+            Strs {
+                name: "hours",
+                suffix: "hrs",
+                mns: &["hr", "hrs", "hour", "hours"],
+            },
+        );
+        basic_unit_suffix(
+            Time(Day),
+            Strs {
+                name: "days",
+                suffix: " days",
+                mns: &["dy", "dys", "day", "days"],
+            },
+        );
+        basic_unit_suffix(
+            Time(Week),
+            Strs {
+                name: " weeks",
+                suffix: "wks",
+                mns: &["wk", "wks", "week", "weeks"],
+            },
+        );
+        basic_unit_suffix(
+            Time(Year),
+            Strs {
+                name: " years",
+                suffix: "yrs",
+                mns: &["yr", "yrs", "year", "years"],
+            },
+        );
 
         for (currency_str, _currency_written) in CURRENCIES {
             let unit = Currency(
