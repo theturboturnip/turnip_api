@@ -183,7 +183,7 @@ impl NumUnitGroup for WeightUnit {
             WeightUnit::TroyOz,
             Strs {
                 name: "troy ounces",
-                suffix: "oz t",
+                suffix: " troy ounces",
                 mns: &[&[
                     "troy",
                     "troy ounce",
@@ -201,7 +201,7 @@ impl NumUnitGroup for WeightUnit {
             WeightUnit::TroyLb,
             Strs {
                 name: "troy pounds",
-                suffix: "lb t",
+                suffix: " troy pounds",
                 mns: &[&[
                     "troy",
                     "troy pound",
