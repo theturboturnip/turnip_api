@@ -60,7 +60,7 @@ impl NumUnitGroup for AreaUnit {
             AreaUnit::Yd2 => (sq!(0.9144), 0.0),
             AreaUnit::Mile2 => (sq!(1609.344), 0.0),
             AreaUnit::Hectare => (10_000.0, 0.0),
-            AreaUnit::Acre => todo!(),
+            AreaUnit::Acre => (4046.8564224, 0.0),
             // AreaUnit::SurveyMile2 => todo!(),
             // AreaUnit::SurveyFt2 => todo!(),
             // AreaUnit::SurveyAcre => todo!(),
@@ -68,7 +68,22 @@ impl NumUnitGroup for AreaUnit {
     }
 
     #[cfg(test)]
-    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[];
+    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[
+        (Self::Km2, 1.0, Self::M2, 1_000_000.0),
+        (Self::Km2, 1.0, Self::Hectare, 100.0),
+        (Self::Km2, 2.5899, Self::Mile2, 1.0),
+        (Self::Km2, 1.0, Self::Acre, 247.1),
+        (Self::Acre, 1.0, Self::Mile2, 1.0 / 640.0),
+        (Self::Acre, 1.0, Self::Yd2, 4840.0),
+        (Self::Acre, 1.0, Self::Ft2, 43560.0),
+        (Self::Ft2, 1.0, Self::In2, 144.0),
+        (Self::Ft2, 1.0, Self::Yd2, 0.1111),
+        (Self::Ft2, 1.0, Self::Cm2, 929.0304),
+        (Self::Cm2, 1.0, Self::Mm2, 10_0.0),
+        (Self::Mm2, 1.0, Self::Um2, 1000_000.0),
+        (Self::Um2, 1.0, Self::Nm2, 1000_000.0),
+        (Self::Nm2, 1.0, Self::Pm2, 1000_000.0),
+    ];
 
     const STRS: &'static [(Self, Strs)] = &[
         (
