@@ -41,7 +41,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "seconds",
                 suffix: "s",
-                mns: &["s", "second", "seconds"],
+                mns: &[&["s", "second", "seconds"]],
             },
         ),
         (
@@ -49,7 +49,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "milliseconds",
                 suffix: "ms",
-                mns: &["ms", "millisecond", "milliseconds"],
+                mns: &[&["ms", "millisecond", "milliseconds"]],
             },
         ),
         (
@@ -57,7 +57,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "microseconds",
                 suffix: "μs",
-                mns: &["μs", "microsecond", "microseconds"],
+                mns: &[&["μs", "microsecond", "microseconds"]],
             },
         ),
         (
@@ -65,7 +65,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "nanoseconds",
                 suffix: "ns",
-                mns: &["ns", "nanosecond", "nanoseconds"],
+                mns: &[&["ns", "nanosecond", "nanoseconds"]],
             },
         ),
         (
@@ -73,7 +73,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "picoseconds",
                 suffix: "ps",
-                mns: &["ps", "picosecond", "picoseconds"],
+                mns: &[&["ps", "picosecond", "picoseconds"]],
             },
         ),
         (
@@ -81,7 +81,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "minutes",
                 suffix: "mins",
-                mns: &["min", "mins", "minute", "minutes"],
+                mns: &[&["min", "mins", "minute", "minutes"]],
             },
         ),
         (
@@ -89,7 +89,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "hours",
                 suffix: "hrs",
-                mns: &["hr", "hrs", "hour", "hours"],
+                mns: &[&["hr", "hrs", "hour", "hours"]],
             },
         ),
         (
@@ -97,7 +97,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: "days",
                 suffix: " days",
-                mns: &["dy", "dys", "day", "days"],
+                mns: &[&["dy", "dys", "day", "days"]],
             },
         ),
         (
@@ -105,7 +105,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: " weeks",
                 suffix: "wks",
-                mns: &["wk", "wks", "week", "weeks"],
+                mns: &[&["wk", "wks", "week", "weeks"]],
             },
         ),
         (
@@ -113,7 +113,7 @@ impl NumUnitGroup for TimeUnit {
             Strs {
                 name: " years",
                 suffix: "yrs",
-                mns: &["yr", "yrs", "year", "years"],
+                mns: &[&["yr", "yrs", "year", "years"]],
             },
         ),
     ];

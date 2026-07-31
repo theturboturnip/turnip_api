@@ -67,7 +67,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "kilometers",
                 suffix: "km",
-                mns: &["kilometer", "kilometre", "kilometers", "kilometres", "km"],
+                mns: &[&["kilometer", "kilometre", "kilometers", "kilometres", "km"]],
             },
         ),
         (
@@ -75,7 +75,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "meters",
                 suffix: "m",
-                mns: &["meter", "metre", "meters", "metres", "m"],
+                mns: &[&["meter", "metre", "meters", "metres", "m"]],
             },
         ),
         (
@@ -83,13 +83,13 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "centimeters",
                 suffix: "cm",
-                mns: &[
+                mns: &[&[
                     "centimeter",
                     "centimetre",
                     "centimeters",
                     "centimetres",
                     "cm",
-                ],
+                ]],
             },
         ),
         (
@@ -97,13 +97,13 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "millimeters",
                 suffix: "mm",
-                mns: &[
+                mns: &[&[
                     "millimeter",
                     "millimetre",
                     "millimeters",
                     "millimetres",
                     "mm",
-                ],
+                ]],
             },
         ),
         (
@@ -111,14 +111,16 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "micrometers",
                 suffix: "μm",
-                mns: &[
+                mns: &[&[
                     "micrometer",
                     "micrometre",
                     "micrometers",
                     "micrometres",
+                    "micron",
+                    "microns",
                     "um",
                     "μm",
-                ],
+                ]],
             },
         ),
         (
@@ -126,7 +128,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "nanometers",
                 suffix: "nm",
-                mns: &["nanometer", "nanometre", "nanometers", "nanometres", "nm"],
+                mns: &[&["nanometer", "nanometre", "nanometers", "nanometres", "nm"]],
             },
         ),
         (
@@ -134,7 +136,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "picometers",
                 suffix: "pm",
-                mns: &["picometer", "picometre", "picometers", "picometres", "pm"],
+                mns: &[&["picometer", "picometre", "picometers", "picometres", "pm"]],
             },
         ),
         (
@@ -142,7 +144,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "inches",
                 suffix: "in",
-                mns: &["inch", "inches", "inchs", "in"],
+                mns: &[&["inch", "inches", "inchs", "in", "ins"]],
             },
         ),
         (
@@ -150,7 +152,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "feet",
                 suffix: "ft",
-                mns: &["foot", "feet", "ft"],
+                mns: &[&["foot", "feet", "ft"]],
             },
         ),
         (
@@ -158,15 +160,15 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "feet and inches",
                 suffix: "ft/in",
-                mns: &["foot", "feet", "ft"],
+                mns: &[&["foot", "feet", "ft"]],
             },
         ),
         (
             LengthUnit::Yd,
             Strs {
-                name: "yds",
-                suffix: " yards",
-                mns: &["yard", "yards", "yd", "yds"],
+                name: "yards",
+                suffix: "yds",
+                mns: &[&["yard", "yards", "yd", "yds"]],
             },
         ),
         (
@@ -174,7 +176,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "miles",
                 suffix: " miles",
-                mns: &["mile", "miles"],
+                mns: &[&["mile", "miles", "mi"]],
             },
         ),
         (
@@ -182,7 +184,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "leagues",
                 suffix: " leagues",
-                mns: &["league", "leagues"],
+                mns: &[&["league", "leagues"]],
             },
         ),
         (
@@ -190,14 +192,14 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "nautical miles",
                 suffix: " nautical miles",
-                mns: &[
+                mns: &[&[
                     "mile",
                     "miles",
                     "nautical mile",
                     "nautical miles",
                     "nmi",
                     "nmis",
-                ],
+                ]],
             },
         ),
         (
@@ -205,7 +207,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "nautical leagues",
                 suffix: " nautical leagues",
-                mns: &["league", "leagues", "nautical league", "nautical leagues"],
+                mns: &[&["league", "leagues", "nautical league", "nautical leagues"]],
             },
         ),
         (
@@ -213,7 +215,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "fathoms",
                 suffix: " fathoms",
-                mns: &["fathom", "fathoms"],
+                mns: &[&["fathom", "fathoms"]],
             },
         ),
         (
@@ -221,7 +223,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "light years",
                 suffix: "ly",
-                mns: &[
+                mns: &[&[
                     "ly",
                     "lys",
                     "lyr",
@@ -232,7 +234,7 @@ impl NumUnitGroup for LengthUnit {
                     "light years",
                     "light-years",
                     "lightyears",
-                ],
+                ]],
             },
         ),
         (
@@ -240,7 +242,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "astronomical units",
                 suffix: "au",
-                mns: &["au", "aus", "astronomical unit", "astronomical units"],
+                mns: &[&["au", "aus", "astronomical unit", "astronomical units"]],
             },
         ),
         (
@@ -248,7 +250,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "parsecs",
                 suffix: "pc",
-                mns: &["pc", "pcs", "parsec", "parsecs"],
+                mns: &[&["pc", "pcs", "parsec", "parsecs"]],
             },
         ),
         (
@@ -256,7 +258,7 @@ impl NumUnitGroup for LengthUnit {
             Strs {
                 name: "furlongs",
                 suffix: "fur",
-                mns: &["fur", "furs", "furlong", "furlongs"],
+                mns: &[&["fur", "furs", "furlong", "furlongs"]],
             },
         ),
     ];

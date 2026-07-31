@@ -24,8 +24,8 @@ use {area::AreaUnit, length::LengthUnit, temp::TempUnit, time::TimeUnit, weight:
 struct Strs {
     name: &'static str,
     suffix: &'static str,
-    /// mnemonics
-    mns: &'static [&'static str],
+    /// mnemonics that a user can type to associate with this unit
+    mns: &'static [&'static [&'static str]],
 }
 
 trait NumUnitGroup:
@@ -168,7 +168,7 @@ impl QuantityCtx {
                     num_unit_to_suffix
                         .entry(unit)
                         .insert_entry(format!("{}", s.suffix));
-                    for s in s.mns {
+                    for s in s.mns.into_iter().map(|slice| slice.into_iter()).flatten() {
                         str_to_num_unit
                             .entry(NumberUnitStr::from(*s))
                             .or_insert_with(NumberUnits::new)

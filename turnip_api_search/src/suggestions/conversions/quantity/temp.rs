@@ -33,14 +33,14 @@ impl NumUnitGroup for TempUnit {
             Strs {
                 name: "°C", // degree sign prefix renders better than dedicated degrees-C
                 suffix: "°C",
-                mns: &[
+                mns: &[&[
                     "celsius", //
                     "c",       //
                     "°c",      // degree sign prefix
                     "˚c",      // 'ring above' prefix, for permissivity
                     "∘c",      // 'ring operator' prefix, for permissivity
                     "℃",       // dedicated "degrees-C" character
-                ],
+                ]],
             },
         ),
         (
@@ -48,14 +48,14 @@ impl NumUnitGroup for TempUnit {
             Strs {
                 name: "°F", // degree sign prefix renders better than dedicated degrees-F
                 suffix: "°F",
-                mns: &[
+                mns: &[&[
                     "fahrenheit", //
                     "f",          //
                     "°f",         // degree sign prefix
                     "˚f",         // 'ring above' prefix, for permissivity
                     "∘f",         // 'ring operator' prefix, for permissivity
                     "℉",          // dedicated "degrees-F" character
-                ],
+                ]],
             },
         ),
         (
@@ -63,14 +63,14 @@ impl NumUnitGroup for TempUnit {
             Strs {
                 name: "kelvin",
                 suffix: "K",
-                mns: &[
+                mns: &[&[
                     "kelvin", //
                     "k",      //
                     "°k",     // degree sign prefix
                     "˚k",     // 'ring above' prefix, for permissivity
                     "∘k",     // 'ring operator' prefix, for permissivity
                               // there is no "degrees-K" character
-                ],
+                ]],
             },
         ),
     ];
