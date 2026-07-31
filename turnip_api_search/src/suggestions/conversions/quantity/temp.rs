@@ -17,6 +17,16 @@ impl NumUnitGroup for TempUnit {
         }
     }
 
+    #[cfg(test)]
+    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[
+        (Self::C, 100.0, Self::F, 211.999999),
+        (Self::C, 0.0, Self::F, 32.0),
+        (Self::K, 273.15, Self::C, 0.0),
+        (Self::K, 273.14, Self::C, -0.01),
+        (Self::K, 273.13, Self::C, -0.02),
+        (Self::F, 50.0, Self::K, 285.15),
+    ];
+
     const STRS: &'static [(Self, Strs)] = &[
         (
             TempUnit::C,

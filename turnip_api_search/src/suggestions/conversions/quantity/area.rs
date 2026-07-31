@@ -51,5 +51,8 @@ impl NumUnitGroup for AreaUnit {
         }
     }
 
+    #[cfg(test)]
+    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[];
+
     const STRS: &'static [(Self, Strs)] = &[];
 }

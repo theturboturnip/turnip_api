@@ -39,5 +39,8 @@ impl NumUnitGroup for WeightUnit {
         }
     }
 
+    #[cfg(test)]
+    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[];
+
     const STRS: &'static [(Self, Strs)] = &[];
 }

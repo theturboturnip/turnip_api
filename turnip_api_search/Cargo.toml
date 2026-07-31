@@ -19,3 +19,6 @@ serde_json = "1.0.150"
 smol_str = "0.3.6"
 strum = { version = "0.28.0", features = ["derive"] }
 turnip_api = { path = "../turnip_api" }
+
+[dev-dependencies]
+approx = "0.5.1"

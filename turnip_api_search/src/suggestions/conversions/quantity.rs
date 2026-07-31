@@ -1,3 +1,5 @@
+#[cfg(test)]
+use approx::assert_relative_eq;
 use arrayvec::ArrayVec;
 use fnv::FnvHashMap;
 use smol_str::SmolStr;
@@ -18,6 +20,7 @@ mod weight;
 
 use {area::AreaUnit, length::LengthUnit, temp::TempUnit, time::TimeUnit, weight::WeightUnit};
 
+/// Metadata for a unit: the long name, the short suffix, and various mnemonics that a user can type to associate with this unit
 struct Strs {
     name: &'static str,
     suffix: &'static str,
@@ -31,10 +34,10 @@ trait NumUnitGroup:
     /// Express the conversion of units in 'self' to units in 'base' as (x, y) where `base_unit = (self * x) + y`
     fn of_base(self) -> (f64, f64);
 
-    const STRS: &'static [(Self, Strs)];
+    #[cfg(test)]
+    const TEST_CASES: &'static [(Self, f64, Self, f64)];
 
-    // #[cfg(test)]
-    // const TEST_CASES: &'static [(Self, f64, Self, f64)];
+    const STRS: &'static [(Self, Strs)];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,6 +48,7 @@ enum NumUnit {
     Temp(TempUnit),
     Time(TimeUnit),
     Weight(WeightUnit),
+    // This is just a string, separate from the other types. Don't need to compile-time enumerate all the currencies.
     Currency(CurrencyStr),
     // ...
 }
@@ -55,14 +59,63 @@ mod tests {
         ($p:ident, $con:expr, $t:ty) => {
             mod $p {
                 use super::super::*;
+
                 #[test]
                 fn test_all_units_stringed() {
                     let stringed = <$t as NumUnitGroup>::STRS
                         .iter()
                         .map(|(u, _s)| *u)
                         .collect::<Vec<_>>();
-                    for u in <$t as VariantArray>::VARIANTS {
-                        assert!(stringed.contains(u), "Enum {:?} is not in STRS", u);
+
+                    let unstringed_variants = <$t as VariantArray>::VARIANTS
+                        .into_iter()
+                        .filter_map(|us| match stringed.iter().find(|u| *u == us) {
+                            Some(_) => None,
+                            None => Some(us),
+                        })
+                        .collect::<Vec<_>>();
+                    if unstringed_variants.len() > 0 {
+                        panic!("STRS didn't string variants {:?}", unstringed_variants);
+                    }
+                }
+
+                #[test]
+                fn test_unit_conversions() {
+                    let mut tested_out = [false; <$t as VariantArray>::VARIANTS.len()];
+
+                    let ctx = QuantityCtx::new();
+
+                    for (ui, vi, uo, vo) in <$t as NumUnitGroup>::TEST_CASES {
+                        let actual_vo = ctx.raw_convert($con(*ui), *vi, $con(*uo), None);
+                        assert!(actual_vo.is_some());
+                        assert_relative_eq!(actual_vo.unwrap(), *vo, max_relative = 0.1);
+
+                        let actual_vi = ctx.raw_convert($con(*uo), *vo, $con(*ui), None);
+                        assert!(actual_vi.is_some());
+                        assert_relative_eq!(actual_vi.unwrap(), *vi, max_relative = 0.1);
+
+                        tested_out[<$t as VariantArray>::VARIANTS
+                            .iter()
+                            .position(|u| *u == *uo)
+                            .unwrap()] = true;
+                    }
+
+                    let untested_variants = tested_out
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(i, b)| {
+                            if b {
+                                None
+                            } else {
+                                Some(<$t as VariantArray>::VARIANTS[i])
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    if untested_variants.len() > 0 {
+                        panic!(
+                            "TEST_CASES didn't test variants {:?} as conversion outputs",
+                            untested_variants
+                        );
                     }
                 }
             }
