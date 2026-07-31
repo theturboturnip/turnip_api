@@ -11,16 +11,23 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum NumUnit {
     Length(LengthUnit),
+    Area(AreaUnit),
+    // TODO Volume(VolumeUnit),
     Temp(TempUnit),
     Time(TimeUnit),
+    Weight(WeightUnit),
     Currency(CurrencyStr),
-    // TODO area, volume
     // ...
 }
 
-trait NumUnitGroup: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash {
+trait NumUnitGroup:
+    std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash + 'static
+{
     /// Express the conversion of units in 'self' to units in 'base' as (x, y) where `base_unit = (self * x) + y`
     fn of_base(self) -> (f64, f64);
+
+    // #[cfg(test)]
+    // const TEST_CASES: &'static [(Self, f64, Self, f64)];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,7 +60,7 @@ enum LengthUnit {
 impl NumUnitGroup for LengthUnit {
     fn of_base(self) -> (f64, f64) {
         match self {
-            LengthUnit::Km => (10_000.0, 0.0),
+            LengthUnit::Km => (1E3, 0.0),
             LengthUnit::M => (1.0, 0.0),
             LengthUnit::Cm => (1E-2, 0.0),
             LengthUnit::Mm => (1E-3, 0.0),
@@ -76,6 +83,56 @@ impl NumUnitGroup for LengthUnit {
             LengthUnit::Parsec => (30856775814913673.0, 0.0),
 
             LengthUnit::Furlong => (201.168, 0.0),
+        }
+    }
+}
+
+macro_rules! sq {
+    ($x:expr) => {
+        ($x * $x)
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum AreaUnit {
+    Km2,
+    M2,
+    Cm2,
+    Mm2,
+    Um2, // aka micrometer aka micron
+    Nm2,
+    Pm2,
+    In2,
+    Ft2,
+    Yd2,
+    Mile2,
+
+    Hectare,
+    Acre,
+
+    SurveyMile2,
+    SurveyFt2,
+    SurveyAcre,
+}
+impl NumUnitGroup for AreaUnit {
+    fn of_base(self) -> (f64, f64) {
+        match self {
+            AreaUnit::Km2 => (1E3, 0.0),
+            AreaUnit::M2 => (1.0, 0.0),
+            AreaUnit::Cm2 => (1E-4, 0.0),
+            AreaUnit::Mm2 => (1E-6, 0.0),
+            AreaUnit::Um2 => (1E-12, 0.0),
+            AreaUnit::Nm2 => (1E-18, 0.0),
+            AreaUnit::Pm2 => (1E-24, 0.0),
+            AreaUnit::In2 => (sq!(0.0254), 0.0),
+            AreaUnit::Ft2 => (sq!(0.3048), 0.0),
+            AreaUnit::Yd2 => (sq!(0.9144), 0.0),
+            AreaUnit::Mile2 => (sq!(1609.344), 0.0),
+            AreaUnit::Hectare => (10_000.0, 0.0),
+            AreaUnit::Acre => todo!(),
+            AreaUnit::SurveyMile2 => todo!(),
+            AreaUnit::SurveyFt2 => todo!(),
+            AreaUnit::SurveyAcre => todo!(),
         }
     }
 }
@@ -123,6 +180,44 @@ impl NumUnitGroup for TimeUnit {
             TimeUnit::Day => (3600.0 * 24.0, 0.0),
             TimeUnit::Week => (3600.0 * 24.0 * 7.0, 0.0),
             TimeUnit::Year => (3600.0 * 24.0 * 365.25, 0.0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum WeightUnit {
+    Tonne,
+    Kg,
+    G,
+    Mg,
+    Ug,
+
+    Oz,
+    Lb,
+    Stone,
+
+    // Grain,
+    // Pennyweight,
+    // Hundredweight,
+    TroyOz,
+    TroyLb,
+
+    Carat,
+}
+impl NumUnitGroup for WeightUnit {
+    fn of_base(self) -> (f64, f64) {
+        match self {
+            WeightUnit::Tonne => (1E6, 0.0),
+            WeightUnit::Kg => (1E3, 0.0),
+            WeightUnit::G => (1.0, 0.0),
+            WeightUnit::Mg => (1E-3, 0.0),
+            WeightUnit::Ug => (1E-6, 0.0),
+            WeightUnit::Oz => (28.349523125, 0.0),
+            WeightUnit::Lb => (453.59237, 0.0),
+            WeightUnit::Stone => (453.59237 * 14.0, 0.0),
+            WeightUnit::TroyOz => (31.1034768, 0.0),
+            WeightUnit::TroyLb => (31.1034768 * 12.0, 0.0),
+            WeightUnit::Carat => (0.2, 0.0),
         }
     }
 }
