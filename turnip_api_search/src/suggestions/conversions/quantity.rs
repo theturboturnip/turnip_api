@@ -720,7 +720,7 @@ impl QuantityCtx {
         }
     }
 
-    fn attempt_convert(
+    fn raw_convert(
         &self,
         input_unit: NumUnit,
         val: f64,
@@ -773,7 +773,7 @@ impl QuantityCtx {
                     NumUnit::Length(LengthUnit::FtIn) => format!(
                         "{:.0}\u{02032}{:.1}\u{02033}",
                         output_val.floor(),
-                        self.attempt_convert(
+                        self.raw_convert(
                             NumUnit::Length(LengthUnit::Ft),
                             output_val.fract(),
                             NumUnit::Length(LengthUnit::In),
@@ -844,7 +844,7 @@ impl QuantityCtx {
                 .into_iter()
                 .map(|i| {
                     output_units.iter().filter_map(|o| {
-                        let v = self.attempt_convert(*i, input_val, *o, Some(currency))?;
+                        let v = self.raw_convert(*i, input_val, *o, Some(currency))?;
                         self.render_conversion(InternalConversion {
                             input_unit: *i,
                             input_val,
