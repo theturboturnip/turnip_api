@@ -20,3 +20,5 @@ docker-build:
 
 docker-run:
     sudo docker run -d -p 3000:3000 --mount type=bind,src=/etc/timezone,dst=/etc/timezone,ro --mount type=bind,src=/usr/share/zoneinfo,dst=/usr/share/zoneinfo,ro  --env-file ./.env theturboturnip/turnip_server:latest
+
+# then, docker image push theturboturnip/turnip_server:latest
