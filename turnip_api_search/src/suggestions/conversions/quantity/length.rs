@@ -59,7 +59,31 @@ impl NumUnitGroup for LengthUnit {
     }
 
     #[cfg(test)]
-    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[];
+    const TEST_CASES: &'static [(Self, f64, Self, f64)] = &[
+        (Self::In, 1.0, Self::Mm, 25.4),
+        (Self::Yd, 1.0, Self::In, 36.0),
+        (Self::Ft, 1.0, Self::In, 12.0),
+        (Self::In, 12.0, Self::FtIn, 1.0),
+        (Self::League, 1.0, Self::Mile, 3.0),
+        (Self::NauticalLeague, 1.0, Self::NauticalMile, 3.0),
+        (Self::NauticalMile, 1.0, Self::M, 1852.0),
+        (Self::NauticalMile, 1.0, Self::Ft, 6076.11549),
+        (Self::NauticalMile, 1.0, Self::Mile, 1.15078),
+        (Self::League, 1.0, Self::Km, 4.83),
+        (Self::Furlong, 1.0, Self::Ft, 660.0),
+        (Self::Furlong, 1.0, Self::Yd, 220.0),
+        (Self::Furlong, 1.0, Self::M, 201.168),
+        (Self::Fathom, 1.0, Self::Ft, 6.0),
+        (Self::Fathom, 1.0, Self::M, 1.8288),
+        (Self::LightYear, 1.0, Self::M, 9.4607E15),
+        (Self::LightYear, 1.0, Self::Mile, 5.8786E12),
+        (Self::LightYear, 1.0, Self::Au, 63241.0),
+        (Self::LightYear, 1.0, Self::Parsec, 0.3066),
+        (Self::Cm, 1.0, Self::Mm, 10.0),
+        (Self::Mm, 1.0, Self::Um, 1000.0),
+        (Self::Um, 1.0, Self::Nm, 1000.0),
+        (Self::Nm, 1.0, Self::Pm, 1000.0),
+    ];
 
     const STRS: &'static [(Self, Strs)] = &[
         (
