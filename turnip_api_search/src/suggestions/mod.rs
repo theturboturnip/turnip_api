@@ -100,7 +100,7 @@ impl<'a> Suggester<'a> {
                 (SearchSuggestApi::Kagi, kagi) => {
                     external_futures.push_back(external::kagi_suggestion(*kagi, query).boxed());
                 }
-                (SearchSuggestApi::DuckDuckGo, ddg) => {
+                (SearchSuggestApi::DuckDuckGo, ddg) | (SearchSuggestApi::DuckDuckGo_AI, ddg) => {
                     external_futures
                         .push_back(external::duckduckgo_suggestion(*ddg, query).boxed());
                 }

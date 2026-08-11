@@ -15,6 +15,7 @@ pub enum SearchSuggestApi {
     Google,
     Kagi,
     DuckDuckGo,
+    DuckDuckGo_AI,
 }
 impl FromStr for SearchSuggestApi {
     type Err = turnip_api::ApiError;
@@ -24,15 +25,16 @@ impl FromStr for SearchSuggestApi {
             "goog" => Ok(SearchSuggestApi::Google),
             "kagi" => Ok(SearchSuggestApi::Kagi),
             "ddg" => Ok(SearchSuggestApi::DuckDuckGo),
+            "ddg-ai" => Ok(SearchSuggestApi::DuckDuckGo_AI),
             _ => Err(turnip_api::ApiError::QueryMalformed),
         }
     }
 }
 
-pub struct PerSearch<T>([T; 3]);
+pub struct PerSearch<T>([T; 4]);
 impl<T> PerSearch<T> {
-    pub fn new(google: T, kagi: T, ddg: T) -> Self {
-        Self([google, kagi, ddg])
+    pub fn new(google: T, kagi: T, ddg: T, ddg_ai: T) -> Self {
+        Self([google, kagi, ddg, ddg_ai])
     }
     fn get(&self, tag: SearchSuggestApi) -> &T {
         &self.0[tag as u8 as usize]
